@@ -1,66 +1,143 @@
 .App {
   text-align: center;
+  background-color: #0b0c10;
+  min-height: 100vh;
+  color: #c5c6c7;
 }
 
-.responsive-canvas{
-  
+body {
+  background-color: #0b0c10;
+  margin: 0;
+  font-family: 'Outfit', 'Roboto', 'Inter', sans-serif;
+  overflow-x: hidden;
 }
 
-.outer-div{
+/* Glassmorphism card */
+.glass-panel {
+  background: rgba(26, 28, 45, 0.65);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  padding: 1.5rem;
+  transition: all 0.3s ease;
+}
+
+.glass-panel:hover {
+  border-color: rgba(0, 255, 136, 0.2);
+  box-shadow: 0 8px 32px 0 rgba(0, 255, 136, 0.1);
+}
+
+.outer-div {
   position: relative;
   height: 480px;
   width: 640px;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  background: #11121d;
+  margin: 0 auto;
 }
 
-.canvas-wrapper{
+.canvas-wrapper {
   position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 10;
+  pointer-events: auto; /* enable orbit controls click */
 }
 
-.webcam-wrapper{
+.webcam-wrapper {
   position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 5;
 }
 
-.wrapper{
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-.glass-canvas{
-  width: 200px;
-  height: 200px;
-}
-
-.App-logo {
-  height: 40vmin;
+.responsive-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 8;
   pointer-events: none;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  .App-logo {
-    animation: App-logo-spin infinite 20s linear;
-  }
+/* UI details */
+.slider-container {
+  margin-top: 1rem;
+  padding: 0.5rem;
 }
 
-.App-header {
-  background-color: #282c34;
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
+.status-badge {
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  font-size: calc(10px + 2vmin);
-  color: white;
+  gap: 0.5rem;
+  padding: 0.35rem 0.85rem;
+  border-radius: 50px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
-.App-link {
-  color: #61dafb;
+.status-active {
+  background: rgba(0, 255, 136, 0.1);
+  color: #00ff88;
+  border: 1px solid rgba(0, 255, 136, 0.3);
 }
 
-@keyframes App-logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+.status-warning {
+  background: rgba(255, 153, 0, 0.1);
+  color: #ff9900;
+  border: 1px solid rgba(255, 153, 0, 0.3);
+}
+
+.status-error {
+  background: rgba(255, 50, 50, 0.1);
+  color: #ff3232;
+  border: 1px solid rgba(255, 50, 50, 0.3);
+}
+
+/* Neon glow buttons */
+.neon-btn {
+  border: 1px solid rgba(0, 255, 136, 0.3) !important;
+  color: #00ff88 !important;
+  background: rgba(0, 255, 136, 0.03) !important;
+  transition: all 0.3s ease !important;
+}
+
+.neon-btn:hover {
+  background: rgba(0, 255, 136, 0.1) !important;
+  box-shadow: 0 0 15px rgba(0, 255, 136, 0.3) !important;
+  border-color: #00ff88 !important;
+}
+
+.model-card {
+  cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 8px;
+  padding: 10px;
+  text-align: center;
+  transition: all 0.2s ease;
+}
+
+.model-card:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.model-card.active {
+  border-color: #00ff88;
+  background: rgba(0, 255, 136, 0.05);
+  box-shadow: 0 0 10px rgba(0, 255, 136, 0.15);
 }
