@@ -479,7 +479,7 @@ function App() {
               <Canvas gl={{ preserveDrawingBuffer: true }} className="canvas-wrapper">
                 <Lights />
                 <Suspense fallback={null}>
-                  <Model url={selectedModel.path} position={[0, 0, -3]} />
+                  <Model key={selectedModel.id} url={selectedModel.path} position={[0, 0, -3]} />
                   <OrbitControls enableZoom={true} />
                 </Suspense>
               </Canvas>
