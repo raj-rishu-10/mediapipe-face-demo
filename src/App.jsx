@@ -102,10 +102,14 @@ function Model({ url, ...props }) {
       const box = new THREE.Box3().setFromObject(gltf.scene);
       const center = box.getCenter(new THREE.Vector3());
       
-      // Recenter model automatically (bridge of glasses to 0,0,0)
+      // Recenter model automatically (bridge of glasses to 0,0)
       gltf.scene.position.x = -center.x;
       gltf.scene.position.y = -center.y;
-      gltf.scene.position.z = -center.z;
+      
+      // Critical fix for "not set on the face": 
+      // Geometric center pushes glasses with long temples forward.
+      // We align the Z-axis to the front of the lenses (max.z) instead of the center!
+      gltf.scene.position.z = -box.max.z + ((box.max.z - box.min.z) * 0.1); 
     }
   }, [gltf.scene]);
 
