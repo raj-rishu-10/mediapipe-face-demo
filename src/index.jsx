@@ -40,6 +40,20 @@ if (typeof window !== 'undefined') {
       let angle = 0;
       const intervalId = setInterval(() => {
         if (!ctx) return;
+
+        if (window.mockMediaElement) {
+          // Draw the uploaded photo/video
+          ctx.drawImage(window.mockMediaElement, 0, 0, canvas.width, canvas.height);
+          
+          // Draw a small indicator that this is a custom uploaded file
+          ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+          ctx.fillRect(10, 10, 140, 25);
+          ctx.fillStyle = '#00ff88';
+          ctx.font = '12px system-ui, -apple-system, sans-serif';
+          ctx.textAlign = 'left';
+          ctx.fillText('Custom Media Active', 18, 27);
+          return;
+        }
         
         // Background gradient
         const grad = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);

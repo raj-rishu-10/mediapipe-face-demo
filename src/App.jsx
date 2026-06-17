@@ -26,10 +26,17 @@ import { useLoader } from "@react-three/fiber";
 import { Suspense } from "react";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
 import { OrbitControls } from "@react-three/drei";
+import * as THREE from 'three';
+import { FaceOccluder } from './components/FaceOccluder';
+import { Vector3KalmanFilter, calculatePD, detectFaceShape, getFrameRecommendations } from './utils/LenskartCore';
 import SecurityIcon from '@mui/icons-material/Security';
 import TuneIcon from '@mui/icons-material/Tune';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import AutorenewIcon from '@mui/icons-material/Autorenew';
+import BugReportIcon from '@mui/icons-material/BugReport';
+import CameraAltIcon from '@mui/icons-material/CameraAlt';
+import FaceRetouchingNaturalIcon from '@mui/icons-material/FaceRetouchingNatural';
+import FileUploadIcon from '@mui/icons-material/FileUpload';
 
 const darkTheme = createTheme({
   palette: {
@@ -59,10 +66,16 @@ const Lights = () => {
 };
 
 // Global variables to pass data smoothly to useFrame (60 FPS rendering)
-var landmark_x = 0;
-var landmark_y = 0;
-var landmark_z = 0;
-var scale_x = 0;
+const targetPos = new THREE.Vector3(0, 0, -3);
+let targetScaleVal = 18;
+let targetRotX = 0;
+let targetRotY = 0;
+let targetRotZ = 0;
+let isFaceTracked = false;
+
+// Initialize Kalman Filters for ultra-smooth tracking (Reduces jitter significantly over Lerp)
+const posFilter = new Vector3KalmanFilter(0.04, 0.005);
+const scaleFilter = new Vector3KalmanFilter(0.08, 0.01);
 
 var manual_mode = true;
 var manual_x = 0;
@@ -71,50 +84,91 @@ var manual_z = -3;
 var manual_scale = 18;
 var manual_rotation_y = 0;
 
+// Export debug info
+let debugInfo = { 
+  templeDistance: 0, scale: 0, angleZ: 0, angleY: 0, fps: 0, eyeCenter: {x: 0, y: 0},
+  pd: 62, faceShape: 'Analyzing...', recommendations: null
+};
+let lastFrameTime = performance.now();
+let frameCount = 0;
+
 function Model({ url, ...props }) {
   const gltf = useLoader(GLTFLoader, url);
-  const ref = useRef();
+  const groupRef = useRef();
   
+  // Automatically calculate model dimensions and recenter
+  useEffect(() => {
+    if (gltf.scene) {
+      const box = new THREE.Box3().setFromObject(gltf.scene);
+      const center = box.getCenter(new THREE.Vector3());
+      
+      // Recenter model automatically (bridge of glasses to 0,0,0)
+      gltf.scene.position.x = -center.x;
+      gltf.scene.position.y = -center.y;
+      gltf.scene.position.z = -center.z;
+    }
+  }, [gltf.scene]);
+
   useFrame((state, delta) => {
-    if (!ref.current) return;
+    if (!groupRef.current) return;
+    
+    // Calculate FPS
+    frameCount++;
+    const now = performance.now();
+    if (now - lastFrameTime >= 1000) {
+      debugInfo.fps = frameCount;
+      frameCount = 0;
+      lastFrameTime = now;
+    }
     
     if (manual_mode) {
-      ref.current.position.x = manual_x;
-      ref.current.position.y = manual_y;
-      ref.current.position.z = manual_z;
-      
-      ref.current.scale.x = manual_scale;
-      ref.current.scale.y = manual_scale;
-      ref.current.scale.z = manual_scale;
-      
-      ref.current.rotation.y = manual_rotation_y;
+      groupRef.current.position.set(manual_x, manual_y, manual_z);
+      groupRef.current.scale.set(manual_scale, manual_scale, manual_scale);
+      groupRef.current.rotation.set(0, manual_rotation_y, 0);
     } else {
-      // Automatic tracking
-      ref.current.position.x = (landmark_x - 0.5) * 10;
-      ref.current.position.y = -(landmark_y - 0.5) * 7.5;
-      ref.current.position.z = -(landmark_z);
-      
-      if (scale_x === 0) {
-        // Fallback default coordinates if tracking hasn't locked onto a face yet
-        ref.current.scale.x = 18;
-        ref.current.scale.y = 18;
-        ref.current.scale.z = 18;
-        ref.current.position.x = 0;
-        ref.current.position.y = 0;
-        ref.current.position.z = -3;
+      if (isFaceTracked) {
+        // Apply configurable offsets (using the manual sliders as fine-tuning offsets in AI mode)
+        const finalTargetPos = new THREE.Vector3(
+          targetPos.x + manual_x,
+          targetPos.y + manual_y,
+          targetPos.z + (manual_z + 3) // +3 to offset the default -3 
+        );
+        
+        // Smoothing using True Kalman Filter for position and scale
+        const filteredPos = posFilter.filter(finalTargetPos);
+        groupRef.current.position.copy(filteredPos);
+        
+        // Dynamic Scale via Kalman
+        // The scale slider provides a base relative size (around 18), we multiply it by our dynamic face scale factor
+        const finalScale = (targetScaleVal / 18) * manual_scale; 
+        const targetScaleVec = new THREE.Vector3(finalScale, finalScale, finalScale);
+        const filteredScale = scaleFilter.filter(targetScaleVec);
+        groupRef.current.scale.copy(filteredScale);
+        
+        // Smooth Rotation (Slerp remains superior for Quaternions)
+        const targetEuler = new THREE.Euler(targetRotX, targetRotY, targetRotZ, 'XYZ');
+        const targetQuat = new THREE.Quaternion().setFromEuler(targetEuler);
+        groupRef.current.quaternion.slerp(targetQuat, 0.35);
+        
+        // Update debug info
+        debugInfo.scale = finalScale;
       } else {
-        ref.current.scale.x = scale_x * 100;
-        ref.current.scale.y = scale_x * 100;
-        ref.current.scale.z = scale_x * 100;
+        // Fallback default coordinates if tracking is lost
+        const fallbackPos = posFilter.filter(new THREE.Vector3(0, 0, -3));
+        groupRef.current.position.copy(fallbackPos);
+        const fallbackScale = scaleFilter.filter(new THREE.Vector3(18, 18, 18));
+        groupRef.current.scale.copy(fallbackScale);
+        groupRef.current.quaternion.slerp(new THREE.Quaternion().identity(), 0.1);
       }
-      ref.current.rotation.y = 0;
     }
   });
 
   return (
-    <>
-      <primitive {...props} ref={ref} object={gltf.scene}></primitive>
-    </>
+    <group ref={groupRef} {...props}>
+      {/* FaceOccluder hides the back temples behind the ears automatically */}
+      <FaceOccluder position={[0, -0.5, -1.5]} scale={2.5} rotationQuat={new THREE.Quaternion()} />
+      <primitive object={gltf.scene} />
+    </group>
   );
 }
 
@@ -133,7 +187,11 @@ function App() {
   const [cameraMocked, setCameraMocked] = useState(false);
   const [mockReason, setMockReason] = useState('');
   const [isManual, setIsManual] = useState(true); // Default to true so user has instant control
+  const [showDebug, setShowDebug] = useState(false);
   const [selectedModel, setSelectedModel] = useState(MODELS_LIST[0]);
+  const [debugOverlayData, setDebugOverlayData] = useState({ 
+    fps: 0, scale: 0, angleZ: 0, templeDist: 0, pd: 62, faceShape: '', recs: null 
+  });
   
   // Slider states for manual control
   const [posX, setPosX] = useState(0);
@@ -163,6 +221,25 @@ function App() {
     manual_mode = isManual;
   }, [isManual]);
 
+  // Update debug stats periodically so we don't spam re-renders on every frame
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (showDebug) {
+        setDebugOverlayData({
+          fps: debugInfo.fps,
+          scale: debugInfo.scale,
+          angleZ: debugInfo.angleZ,
+          angleY: debugInfo.angleY,
+          templeDist: debugInfo.templeDistance,
+          pd: debugInfo.pd,
+          faceShape: debugInfo.faceShape,
+          recs: debugInfo.recommendations
+        });
+      }
+    }, 200);
+    return () => clearInterval(interval);
+  }, [showDebug]);
+
   useEffect(() => {
     manual_x = posX;
     manual_y = posY;
@@ -180,16 +257,116 @@ function App() {
     setRotY(0);
   };
 
+  // Capture System - Generates Screenshot for Download
+  const handleScreenshot = () => {
+    if (!webcamRef.current || !canvasRef.current) return;
+    
+    // Find the active WebGL React Three Fiber Canvas
+    const threeCanvas = document.querySelector('.canvas-wrapper canvas');
+    if (!threeCanvas) return;
+    
+    const captureCanvas = document.createElement('canvas');
+    captureCanvas.width = webcamRef.current.video.videoWidth;
+    captureCanvas.height = webcamRef.current.video.videoHeight;
+    const ctx = captureCanvas.getContext('2d');
+    
+    // 1. Draw mirrored webcam frame
+    ctx.translate(captureCanvas.width, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(webcamRef.current.video, 0, 0, captureCanvas.width, captureCanvas.height);
+    
+    // 2. Overlay 3D scene (reset transform as 3D canvas handles mirror internally)
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(threeCanvas, 0, 0, captureCanvas.width, captureCanvas.height);
+    
+    // 3. Trigger native download
+    const link = document.createElement('a');
+    link.download = `lenskart-fit-${new Date().getTime()}.png`;
+    link.href = captureCanvas.toDataURL('image/png');
+    link.click();
+  };
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const url = URL.createObjectURL(file);
+    if (file.type.startsWith('video/')) {
+      const video = document.createElement('video');
+      video.src = url;
+      video.loop = true;
+      video.muted = true;
+      video.play().catch(console.error);
+      window.mockMediaElement = video;
+      setIsManual(false); // Switch back to AI Tracking mode for the uploaded media
+    } else if (file.type.startsWith('image/')) {
+      const img = new Image();
+      img.src = url;
+      img.onload = () => {
+        window.mockMediaElement = img;
+        setIsManual(false); // Switch back to AI Tracking mode
+      };
+    }
+  };
+
   function onResults(results) {
-    if (results.multiFaceLandmarks) {
-      for (const landmarks of results.multiFaceLandmarks) {
-        if (landmarks[0].x !== undefined) {
-          landmark_x = landmarks[168].x;
-          landmark_y = landmarks[168].y;
-          landmark_z = landmarks[168].z;
-          scale_x = landmarks[265].x - landmarks[35].x;
-        }
-      }
+    if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+      isFaceTracked = true;
+      const landmarks = results.multiFaceLandmarks[0];
+      
+      // Target specific landmarks
+      const leftEye = landmarks[33]; 
+      const rightEye = landmarks[263]; 
+      const leftTemple = landmarks[234];
+      const rightTemple = landmarks[454];
+      const noseBridge = landmarks[168];
+
+      // 2. Position Calculation
+      // Calculate eye center (primary anchor)
+      const eyeCenterX = (leftEye.x + rightEye.x) / 2;
+      const eyeCenterY = (leftEye.y + rightEye.y) / 2;
+      const eyeCenterZ = (leftEye.z + rightEye.z) / 2;
+
+      debugInfo.eyeCenter = { x: eyeCenterX, y: eyeCenterY };
+
+      // Map mapped points to 3D coordinate space mapping 16:9 
+      targetPos.x = (eyeCenterX - 0.5) * 10;
+      targetPos.y = -(eyeCenterY - 0.5) * 7.5;
+      targetPos.z = -(noseBridge.z) * 10;
+
+      // 3. Dynamic Scaling 
+      const templeDistance = Math.hypot(rightTemple.x - leftTemple.x, rightTemple.y - leftTemple.y);
+      debugInfo.templeDistance = templeDistance;
+      
+      // Calculate scale relative to temple distance (multiplier tuned for normal face distance)
+      targetScaleVal = templeDistance * 45; 
+
+      // 4. Rotation Calculations
+      // Z Rotation (Head tilt)
+      const angleZ = Math.atan2(rightTemple.y - leftTemple.y, rightTemple.x - leftTemple.x);
+      targetRotZ = -angleZ; 
+      debugInfo.angleZ = angleZ;
+
+      // Y Rotation (Head turn left/right)
+      const angleY = Math.asin((rightTemple.z - leftTemple.z) / templeDistance);
+      targetRotY = angleY;
+      debugInfo.angleY = angleY;
+
+      // X Rotation (Head tilt up/down)
+      const faceHeight = Math.hypot(landmarks[152].x - landmarks[10].x, landmarks[152].y - landmarks[10].y);
+      const angleX = Math.asin((noseBridge.z - landmarks[152].z) / faceHeight);
+      targetRotX = angleX - 0.1; // mild offset for glasses resting angle
+
+      // 5. Face Shape & PD (analyzed passively for AI Recommendations)
+      const currentPd = calculatePD(landmarks);
+      const currentShape = detectFaceShape(landmarks);
+      
+      // Update global debug info dynamically
+      debugInfo.pd = Math.round(currentPd);
+      debugInfo.faceShape = currentShape;
+      debugInfo.recommendations = getFrameRecommendations(currentShape);
+
+    } else {
+      isFaceTracked = false;
     }
 
     if (canvasRef.current && webcamRef.current && webcamRef.current.video) {
@@ -204,14 +381,28 @@ function App() {
 
       if (results.multiFaceLandmarks && connect) {
         for (const landmarks of results.multiFaceLandmarks) {
-          connect(canvasCtx, landmarks, Facemesh.FACEMESH_RIGHT_EYE, {color: '#00ff88', lineWidth: 1});
-          connect(canvasCtx, landmarks, Facemesh.FACEMESH_RIGHT_EYEBROW, {color: '#00ff88', lineWidth: 1});
-          connect(canvasCtx, landmarks, Facemesh.FACEMESH_RIGHT_IRIS, {color: '#00ff88', lineWidth: 1});
-          connect(canvasCtx, landmarks, Facemesh.FACEMESH_LEFT_EYE, {color: '#00ff88', lineWidth: 1});
-          connect(canvasCtx, landmarks, Facemesh.FACEMESH_LEFT_EYEBROW, {color: '#00ff88', lineWidth: 1});
-          connect(canvasCtx, landmarks, Facemesh.FACEMESH_LEFT_IRIS, {color: '#00ff88', lineWidth: 1});
-          connect(canvasCtx, landmarks, Facemesh.FACEMESH_FACE_OVAL, {color: 'rgba(255,255,255,0.4)', lineWidth: 1});
-          connect(canvasCtx, landmarks, Facemesh.FACEMESH_LIPS, {color: '#ff3030', lineWidth: 1});
+          if (!manual_mode && showDebug) {
+             // Debug overlay: Render developer landmark dots (8)
+             const debugLandmarks = [33, 263, 168, 234, 454];
+             canvasCtx.fillStyle = '#ff3366';
+             for (let i of debugLandmarks) {
+                 const lm = landmarks[i];
+                 canvasCtx.beginPath();
+                 canvasCtx.arc(lm.x * canvasElement.width, lm.y * canvasElement.height, 4, 0, 2 * Math.PI);
+                 canvasCtx.fill();
+                 
+                 // Text label
+                 canvasCtx.fillStyle = '#ffffff';
+                 canvasCtx.font = '10px Arial';
+                 canvasCtx.fillText(`L${i}`, lm.x * canvasElement.width + 5, lm.y * canvasElement.height - 5);
+                 canvasCtx.fillStyle = '#ff3366';
+             }
+          }
+
+          // Face mesh wireframe for context
+          connect(canvasCtx, landmarks, Facemesh.FACEMESH_RIGHT_EYE, {color: 'rgba(0, 255, 136, 0.3)', lineWidth: 1});
+          connect(canvasCtx, landmarks, Facemesh.FACEMESH_LEFT_EYE, {color: 'rgba(0, 255, 136, 0.3)', lineWidth: 1});
+          connect(canvasCtx, landmarks, Facemesh.FACEMESH_FACE_OVAL, {color: 'rgba(255,255,255,0.1)', lineWidth: 1});
         }
       }
       canvasCtx.restore();
@@ -276,7 +467,7 @@ function App() {
           
           {/* Main Visualizer Panel */}
           <Grid item xs={12} md={7} lg={7}>
-            <Box className="outer-div">
+            <Box className="outer-div" sx={{ position: 'relative' }}>
               <Webcam 
                 ref={webcamRef} 
                 className="webcam-wrapper" 
@@ -284,8 +475,8 @@ function App() {
                 audio={false}
                 screenshotFormat="image/jpeg"
               />
-              <canvas hidden className="responsive-canvas" ref={canvasRef} style={{ zIndex: 9 }} />
-              <Canvas className="canvas-wrapper">
+              <canvas hidden={!showDebug} className="responsive-canvas" ref={canvasRef} style={{ zIndex: 9, opacity: showDebug ? 0.7 : 0 }} />
+              <Canvas gl={{ preserveDrawingBuffer: true }} className="canvas-wrapper">
                 <Lights />
                 <Suspense fallback={null}>
                   <Model url={selectedModel.path} position={[0, 0, -3]} />
@@ -294,7 +485,7 @@ function App() {
               </Canvas>
             </Box>
             
-            <Box sx={{ mt: 2, display: 'flex', gap: 2, justifyContent: 'center' }}>
+            <Box sx={{ mt: 2, display: 'flex', gap: 2, justifyContent: 'center', flexWrap: 'wrap' }}>
               {cameraMocked ? (
                 <Box className="status-badge status-warning">
                   <SecurityIcon fontSize="small" />
@@ -306,7 +497,85 @@ function App() {
                   Hardware Camera Active
                 </Box>
               )}
+              <Button 
+                variant={showDebug ? "contained" : "outlined"}
+                color="secondary"
+                size="small"
+                startIcon={<BugReportIcon />}
+                onClick={() => setShowDebug(!showDebug)}
+                sx={{ borderRadius: '20px', textTransform: 'none' }}
+              >
+                Developer Debug Mode
+              </Button>
+              <Button 
+                variant="contained" 
+                color="primary"
+                size="small"
+                onClick={handleScreenshot}
+                startIcon={<CameraAltIcon />}
+                sx={{ borderRadius: '20px', textTransform: 'none', ml: 1, boxShadow: '0 0 10px rgba(0,255,136,0.3)' }}
+              >
+                Capture Fit
+              </Button>
+              {cameraMocked && (
+                <Button
+                  component="label"
+                  variant="outlined"
+                  size="small"
+                  startIcon={<FileUploadIcon />}
+                  sx={{ borderRadius: '20px', textTransform: 'none', ml: 1, color: '#00ff88', borderColor: '#00ff88' }}
+                >
+                  Upload Media
+                  <input
+                    type="file"
+                    hidden
+                    accept="image/*,video/*"
+                    onChange={handleFileUpload}
+                  />
+                </Button>
+              )}
             </Box>
+
+            {/* Debug Overlay */}
+            {showDebug && (
+              <Box sx={{ 
+                mt: 2, 
+                p: 2, 
+                backgroundColor: 'rgba(20, 25, 40, 0.8)', 
+                border: '1px solid rgba(100, 150, 255, 0.2)',
+                borderRadius: '8px',
+                backdropFilter: 'blur(10px)',
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
+                gap: 2
+              }}>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">FPS</Typography>
+                  <Typography variant="body2" fontWeight="bold" color={debugOverlayData.fps < 30 ? "error.main" : "primary.main"}>
+                    {debugOverlayData.fps}
+                  </Typography>
+                </Box>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">Scale</Typography>
+                  <Typography variant="body2" fontWeight="bold" color="white">
+                    {debugOverlayData.scale.toFixed(2)}
+                  </Typography>
+                </Box>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">Face Z-Angle</Typography>
+                  <Typography variant="body2" fontWeight="bold" color="white">
+                    {((debugOverlayData.angleZ * 180) / Math.PI).toFixed(1)}°
+                  </Typography>
+                </Box>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">Temple Distance</Typography>
+                  <Typography variant="body2" fontWeight="bold" color="white">
+                    {debugOverlayData.templeDist.toFixed(3)}
+                  </Typography>
+                </Box>
+              </Box>
+            )}
+
           </Grid>
           
           {/* Controls and Customizations Panel */}
@@ -317,6 +586,21 @@ function App() {
                   <TuneIcon color="primary" /> Glasses Configurator
                 </Typography>
                 
+                {/* AI Recommendation Panel */}
+                {!isManual && debugOverlayData.recs && (
+                  <Alert 
+                    icon={<FaceRetouchingNaturalIcon />} 
+                    severity="info" 
+                    sx={{ mb: 2, borderRadius: '10px', backgroundColor: 'rgba(0, 255, 136, 0.08)', border: '1px solid rgba(0, 255, 136, 0.2)', color: '#fff' }}
+                  >
+                    <Typography variant="subtitle2" fontWeight="bold">Detected Face: {debugOverlayData.faceShape}</Typography>
+                    <Typography variant="caption" sx={{ opacity: 0.8 }}>PD: {debugOverlayData.pd}mm • {debugOverlayData.recs.desc}</Typography>
+                    <Typography variant="caption" sx={{ display: 'block', mt: 0.5, color: '#00ff88', fontWeight: 'bold' }}>
+                      Recommended: {debugOverlayData.recs.best.join(', ')}
+                    </Typography>
+                  </Alert>
+                )}
+
                 {cameraMocked && (
                   <Alert severity="warning" sx={{ mb: 2, borderRadius: '10px', backgroundColor: 'rgba(255, 153, 0, 0.08)', border: '1px solid rgba(255, 153, 0, 0.2)' }}>
                     Camera access blocked or unsupported ({mockReason}). Using simulated feed and manual mode.
@@ -364,12 +648,15 @@ function App() {
                   />
                 </Box>
                 
-                {/* Manual Sliders */}
-                <Box sx={{ opacity: isManual ? 1 : 0.4, pointerEvents: isManual ? 'auto' : 'none', transition: 'all 0.3s ease' }}>
+                {/* Manual Sliders (Now act as offsets for AI Tracking as well) */}
+                <Box sx={{ pointerEvents: 'auto', transition: 'all 0.3s ease' }}>
+                  <Typography variant="caption" sx={{ display: 'block', mb: 2, color: '#888bc4' }}>
+                    {isManual ? "Use sliders to place the glasses." : "Use sliders to fine-tune offsets for the AI tracking."}
+                  </Typography>
                   <Stack spacing={2} className="slider-container">
                     <Box>
                       <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <Typography variant="caption" sx={{ color: '#c5c6c7' }}>Position X (Left / Right)</Typography>
+                        <Typography variant="caption" sx={{ color: '#c5c6c7' }}>Position X (Left / Right) {!isManual && 'Offset'}</Typography>
                         <Typography variant="caption" fontWeight="600" color="primary">{posX.toFixed(2)}</Typography>
                       </Box>
                       <Slider 
@@ -378,13 +665,12 @@ function App() {
                         max={5} 
                         step={0.05} 
                         onChange={(e, val) => setPosX(val)} 
-                        valueLabelDisplay="auto"
                       />
                     </Box>
 
                     <Box>
                       <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <Typography variant="caption" sx={{ color: '#c5c6c7' }}>Position Y (Up / Down)</Typography>
+                        <Typography variant="caption" sx={{ color: '#c5c6c7' }}>Position Y (Up / Down) {!isManual && 'Offset'}</Typography>
                         <Typography variant="caption" fontWeight="600" color="primary">{posY.toFixed(2)}</Typography>
                       </Box>
                       <Slider 
@@ -393,41 +679,38 @@ function App() {
                         max={5} 
                         step={0.05} 
                         onChange={(e, val) => setPosY(val)} 
-                        valueLabelDisplay="auto"
                       />
                     </Box>
 
                     <Box>
                       <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <Typography variant="caption" sx={{ color: '#c5c6c7' }}>Position Z (Depth)</Typography>
+                        <Typography variant="caption" sx={{ color: '#c5c6c7' }}>Position Z (Depth) {!isManual && 'Offset'}</Typography>
                         <Typography variant="caption" fontWeight="600" color="primary">{posZ.toFixed(2)}</Typography>
                       </Box>
                       <Slider 
                         value={posZ} 
                         min={-10} 
-                        max={2} 
+                        max={5} 
                         step={0.1} 
                         onChange={(e, val) => setPosZ(val)} 
-                        valueLabelDisplay="auto"
                       />
                     </Box>
 
                     <Box>
                       <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <Typography variant="caption" sx={{ color: '#c5c6c7' }}>Scale (Size)</Typography>
+                        <Typography variant="caption" sx={{ color: '#c5c6c7' }}>Scale (Size) {!isManual && 'Modifier'}</Typography>
                         <Typography variant="caption" fontWeight="600" color="primary">{scale.toFixed(1)}</Typography>
                       </Box>
                       <Slider 
                         value={scale} 
                         min={5} 
-                        max={50} 
+                        max={40} 
                         step={0.5} 
                         onChange={(e, val) => setScale(val)} 
-                        valueLabelDisplay="auto"
                       />
                     </Box>
 
-                    <Box>
+                    <Box sx={{ display: isManual ? 'block' : 'none' }}>
                       <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                         <Typography variant="caption" sx={{ color: '#c5c6c7' }}>Angle (Rotation)</Typography>
                         <Typography variant="caption" fontWeight="600" color="primary">{((rotY * 180) / Math.PI).toFixed(0)}°</Typography>
@@ -438,7 +721,6 @@ function App() {
                         max={Math.PI} 
                         step={0.05} 
                         onChange={(e, val) => setRotY(val)} 
-                        valueLabelDisplay="auto"
                       />
                     </Box>
 
