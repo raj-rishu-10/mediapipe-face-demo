@@ -37,16 +37,26 @@ export function GlassesModel({ url }) {
 
     clone.position.x = -center.x;
     clone.position.y = -center.y;
-
-    // Align Z so the back face of the lenses (closest to the face) sits at Z=0
     clone.position.z = -box.max.z + (box.max.z - box.min.z) * 0.1;
+
+    // Normalize scale: make the width of the glasses exactly 1.0 unit in local space
+    const width = box.max.x - box.min.x;
+    if (width > 0) {
+      clone.scale.setScalar(1.0 / width);
+    }
 
     return clone;
   }, [gltf.scene]);
 
   if (!clonedScene) return null;
 
-  return <primitive object={clonedScene} />;
+  // Wrap in a group to apply a slight downward and forward offset in FaceAnchor units
+  // so the glasses rest naturally on the nose bridge slightly below the eye center.
+  return (
+    <group position={[0, -0.05, 0.15]}>
+      <primitive object={clonedScene} />
+    </group>
+  );
 }
 
 // Preload helper to cache all models on startup

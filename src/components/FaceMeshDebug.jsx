@@ -15,55 +15,72 @@ const LM_DEBUG = [
 /**
  * FaceMeshDebug
  *
- * Renders colored 3D spheres at key face landmarks so you can visually verify
- * that the coordinate mapping is correct.
- *
- * Only rendered when showDebug is true.
+ * Renders colored 3D spheres at key face landmarks + the FaceAnchor coordinate pivot
+ * so you can visually verify that the coordinate mapping is correct.
  */
 export function FaceMeshDebug({ showDebug }) {
   const dotRefs = useRef({});
 
-  useFrame(() => {
+  useFrame((state) => {
     if (!showDebug) return;
-    const { debugData } = useTrackingStore.getState();
+    const { debugData, targetPos, isFaceTracked } = useTrackingStore.getState();
     const landmarks = debugData?.landmarks;
     if (!landmarks) return;
 
+    // Viewport dimensions at target depth D (in meters)
+    const D = isFaceTracked ? -targetPos.z : 0.6;
+    const halfTanFOVY = Math.tan((state.camera.fov * Math.PI) / 360);
+    const viewportHeight = 2 * D * halfTanFOVY;
+    const viewportWidth  = viewportHeight * state.viewport.aspect;
+
+    // 1. Position key landmarks
     LM_DEBUG.forEach((idx) => {
       const ref = dotRefs.current[idx];
       if (!ref) return;
       const lm = landmarks[idx];
       if (!lm) return;
 
-      // Unmirrored X mapping because the R3F Canvas is already CSS-mirrored
-      const wx = (lm.x - 0.5) * 10;
-      const wy = -(lm.y - 0.5) * 7.5;
-      const wz = -3 + (lm.z || 0) * 5;
+      const wx = (lm.x - 0.5) * viewportWidth;
+      const wy = -(lm.y - 0.5) * viewportHeight;
+      const wz = targetPos.z; // Align depth with face plane
       ref.position.set(wx, wy, wz);
     });
+
+    // 2. Position the FaceAnchor pivot marker
+    const anchorRef = dotRefs.current['anchor'];
+    if (anchorRef) {
+      anchorRef.position.copy(targetPos);
+    }
   });
 
   if (!showDebug) return null;
 
   const colors = {
-    [LM.LEFT_EYE_OUTER]:  '#ff0055', // Red
-    [LM.RIGHT_EYE_OUTER]: '#00ff88', // Green
-    [LM.LEFT_TEMPLE]:     '#ffaa00', // Orange
-    [LM.RIGHT_TEMPLE]:    '#00aaff', // Blue
-    [LM.NOSE_BRIDGE]:     '#ffffff', // White
+    [LM.LEFT_EYE_OUTER]:  '#ff0055', // Red (Left Eye)
+    [LM.RIGHT_EYE_OUTER]: '#00ff88', // Green (Right Eye)
+    [LM.LEFT_TEMPLE]:     '#ffaa00', // Orange (Left Temple)
+    [LM.RIGHT_TEMPLE]:    '#00aaff', // Blue (Right Temple)
+    [LM.NOSE_BRIDGE]:     '#ffffff', // White (Nose Bridge)
   };
 
   return (
     <group>
+      {/* 5 Key face landmarks */}
       {LM_DEBUG.map((idx) => (
         <mesh
           key={idx}
           ref={(r) => { if (r) dotRefs.current[idx] = r; }}
         >
-          <sphereGeometry args={[0.08, 16, 16]} />
+          <sphereGeometry args={[0.015, 16, 16]} />
           <meshBasicMaterial color={colors[idx] || '#ffffff'} depthTest={false} transparent opacity={0.9} />
         </mesh>
       ))}
+
+      {/* FaceAnchor center pivot marker (Magenta) */}
+      <mesh ref={(r) => { if (r) dotRefs.current['anchor'] = r; }}>
+        <sphereGeometry args={[0.02, 16, 16]} />
+        <meshBasicMaterial color="#ff00ff" depthTest={false} transparent opacity={0.9} />
+      </mesh>
     </group>
   );
 }

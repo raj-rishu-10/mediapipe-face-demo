@@ -66,8 +66,13 @@ export function useFaceLandmarker(videoRef, manualOffsets, enabled) {
         video._lastProcessed = video.currentTime;
 
         try {
+          // Compute active video aspect ratio dynamically to match R3F viewport aspect
+          const videoWidth  = video.videoWidth || 640;
+          const videoHeight = video.videoHeight || 480;
+          const aspect      = videoWidth / videoHeight;
+
           const results = landmarkerRef.current.detectForVideo(video, performance.now());
-          processTrackingResults(results, manualOffsets);
+          processTrackingResults(results, manualOffsets, { fov: 38, aspect });
         } catch (err) {
           console.error('[useFaceLandmarker] detectForVideo error:', err);
         }
