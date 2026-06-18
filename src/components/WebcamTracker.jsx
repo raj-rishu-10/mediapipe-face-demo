@@ -31,7 +31,8 @@ export function WebcamTracker({ webcamRef, manualOffsets, enabled }) {
       audio={false}
       mirrored={true}      // CSS scaleX(-1) — matches Jeeliz mirrorX class
       screenshotFormat="image/jpeg"
-      videoConstraints={{ facingMode: 'user', width: 1280, height: 720 }}
+      playsInline={true}
+      videoConstraints={{ facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }}
       style={{
         position:  'absolute',
         top:       0,

@@ -118,7 +118,7 @@ export default function App() {
 
   const [cameraMocked,   setCameraMocked]   = useState(false);
   const [mockReason,     setMockReason]     = useState('');
-  const [isManual,       setIsManual]       = useState(true);
+  const [isManual,       setIsManual]       = useState(false);
   const [showDebug,      setShowDebug]      = useState(false);
   const [selectedModel,  setSelectedModel]  = useState(MODELS_LIST[0]);
   const [debugDisplay,   setDebugDisplay]   = useState({
