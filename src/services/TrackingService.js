@@ -100,7 +100,7 @@ export function processTrackingResults(results, manualOffsets = {}, cameraOption
   const faceWidthMeters = templeDist * viewportWidth;
 
   const userScaleFactor = (manualOffsets.scale !== undefined)
-    ? manualOffsets.scale / 18
+    ? manualOffsets.scale / 0.14
     : 1.0;
   
   // targetScale is the physical face width scaled by the user slider factor

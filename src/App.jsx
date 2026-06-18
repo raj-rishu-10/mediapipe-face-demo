@@ -128,8 +128,8 @@ export default function App() {
   // Manual slider state
   const [posX,  setPosX]  = useState(0);
   const [posY,  setPosY]  = useState(0);
-  const [posZ,  setPosZ]  = useState(-3);
-  const [scale, setScale] = useState(18);
+  const [posZ,  setPosZ]  = useState(-0.6);
+  const [scale, setScale] = useState(0.14);
   const [rotY,  setRotY]  = useState(0);
 
   // Listen for camera-fallback polyfill event from index.jsx
@@ -163,7 +163,7 @@ export default function App() {
   }, [showDebug]);
 
   const handleResetSliders = () => {
-    setPosX(0); setPosY(0); setPosZ(-3); setScale(18); setRotY(0);
+    setPosX(0); setPosY(0); setPosZ(-0.6); setScale(0.14); setRotY(0);
   };
 
   const handleScreenshot = useCallback(() => {
@@ -205,7 +205,7 @@ export default function App() {
   };
 
   // Offsets passed to TrackingService for fine-tuning
-  const manualOffsets = { x: posX, y: posY, z: posZ - (-3), scale };
+  const manualOffsets = { x: posX, y: posY, z: posZ - (-0.6), scale };
 
   return (
     <ThemeProvider theme={darkTheme}>
@@ -440,10 +440,10 @@ export default function App() {
                 {/* Sliders */}
                 <Stack spacing={2} className="slider-container">
                   {[
-                    { label: 'Position X (Left/Right)', val: posX, set: setPosX, min: -5, max: 5, step: 0.05, fmt: (v) => v.toFixed(2) },
-                    { label: 'Position Y (Up/Down)',    val: posY, set: setPosY, min: -5, max: 5, step: 0.05, fmt: (v) => v.toFixed(2) },
-                    { label: 'Position Z (Depth)',      val: posZ, set: setPosZ, min: -10, max: 5, step: 0.1, fmt: (v) => v.toFixed(2) },
-                    { label: 'Scale (Size)',            val: scale, set: setScale, min: 5, max: 40, step: 0.5, fmt: (v) => v.toFixed(1) },
+                    { label: 'Position X (Left/Right)', val: posX, set: setPosX, min: -0.4, max: 0.4, step: 0.005, fmt: (v) => v.toFixed(3) },
+                    { label: 'Position Y (Up/Down)',    val: posY, set: setPosY, min: -0.4, max: 0.4, step: 0.005, fmt: (v) => v.toFixed(3) },
+                    { label: 'Position Z (Depth)',      val: posZ, set: setPosZ, min: -1.2, max: -0.2, step: 0.01, fmt: (v) => v.toFixed(2) },
+                    { label: 'Scale (Size)',            val: scale, set: setScale, min: 0.08, max: 0.22, step: 0.002, fmt: (v) => v.toFixed(3) },
                   ].map(({ label, val, set, min, max, step, fmt }) => (
                     <Box key={label}>
                       <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
