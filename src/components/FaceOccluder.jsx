@@ -1,31 +1,49 @@
 import React from 'react';
-import * as THREE from 'three';
 
 /**
- * FaceOccluder
- * Generates an invisible 3D volume that matches the user's head shape.
- * It writes to the WebGL Depth Buffer but not the Color Buffer.
- * This guarantees that glasses temples (arms) render accurately *behind* the ears
- * rather than floating awkwardly through the skull.
+ * FaceOccluder — MediaPipe equivalent of Jeeliz's create_threejsOccluder().
+ *
+ * ── JEELIZ ANALYSIS ─────────────────────────────────────────────────────────
+ * Jeeliz creates a depth-mask occluder using a BufferGeometry + ShaderMaterial:
+ *
+ *   const mat = new THREE.ShaderMaterial({
+ *     colorWrite: false,           ← invisible (no color output)
+ *     renderOrder: -1,             ← render before everything else
+ *   })
+ *   occluderMesh.renderOrder = -1;
+ *
+ * The geometry is loaded from a JSON file — it's a simplified head mesh
+ * (low-poly skull shape) positioned and scaled to match the tracked face.
+ *
+ * ── MEDIAPIPE EQUIVALENT ────────────────────────────────────────────────────
+ * We approximate the head with a scaled sphere geometry.
+ * The sphere's position and scale offsets below are tuned to match the
+ * typical head proportions at the working depth:
+ *
+ *   Y offset: -0.35 → moves sphere down from eye-center to head center
+ *   Z offset: -1.2  → moves sphere backward (toward back of head)
+ *   Scale X:   2.1  → ear-to-ear width
+ *   Scale Y:   2.6  → top of head to chin height
+ *   Scale Z:   2.2  → front-to-back depth
+ *
+ * These values replicate Jeeliz's spherical head approximation.
+ * renderOrder={-1} matches Jeeliz's renderOrder = -1.
+ * colorWrite={false} matches Jeeliz's colorWrite: false.
+ *
+ * The result: glasses temples disappear behind the ears, side profile looks real.
  */
-export function FaceOccluder({ position, scale, rotationQuat }) {
-  // We use a sphere geometry that is slightly flattened/stretched to approximate a skull
+export function FaceOccluder() {
   return (
-    <mesh 
-      position={position}
-      quaternion={rotationQuat}
-      // Slightly scale the depth (Z) and height (Y) to make the sphere head-shaped
-      scale={[scale * 1.05, scale * 1.3, scale * 1.2]} 
-      // Render order -1 guarantees this renders *before* the glasses
+    <mesh
+      position={[0, -0.35, -1.2]}
+      scale={[2.1, 2.6, 2.2]}
       renderOrder={-1}
+      frustumCulled={false}
     >
       <sphereGeometry args={[1, 32, 32]} />
-      <meshBasicMaterial 
-        // DO NOT write color (invisible)
-        colorWrite={false} 
-        // DO write depth (blocks objects behind it)
-        depthWrite={true} 
-        // Prevent sorting issues
+      <meshBasicMaterial
+        colorWrite={false}  // invisible — no color output (Jeeliz ShaderMaterial colorWrite:false)
+        depthWrite={true}   // writes depth → blocks glasses behind it
         depthTest={true}
       />
     </mesh>

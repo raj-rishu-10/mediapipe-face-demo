@@ -1,639 +1,260 @@
 import './App.css';
-import Webcam from "react-webcam";
-import { useRef, useEffect, useState, useMemo } from 'react';
-import { FaceLandmarker, FilesetResolver } from "@mediapipe/tasks-vision";
-import { ThemeProvider, createTheme } from "@mui/material/styles";
+import { useRef, useState, useEffect, useCallback } from 'react';
+import { ThemeProvider, createTheme } from '@mui/material/styles';
 import {
-  Grid,
-  Card,
-  CardContent,
-  Typography,
-  Slider,
-  Switch,
-  FormControlLabel,
-  Button,
-  Box,
-  Divider,
-  Stack,
-  Alert,
-  Tooltip
+  Grid, Card, CardContent, Typography, Slider, Switch,
+  FormControlLabel, Button, Box, Divider, Stack, Alert, Tooltip,
 } from '@mui/material';
 import Header from './Header';
-import { Canvas, useFrame, useLoader } from "@react-three/fiber";
-import { Suspense } from "react";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
-import { OrbitControls } from "@react-three/drei";
-import * as THREE from 'three';
-import { FaceOccluder } from './components/FaceOccluder';
-import { Vector3KalmanFilter, calculatePD, detectFaceShape, getFrameRecommendations } from './utils/LenskartCore';
-import SecurityIcon from '@mui/icons-material/Security';
-import TuneIcon from '@mui/icons-material/Tune';
+import SecurityIcon           from '@mui/icons-material/Security';
+import TuneIcon               from '@mui/icons-material/Tune';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
-import AutorenewIcon from '@mui/icons-material/Autorenew';
-import BugReportIcon from '@mui/icons-material/BugReport';
-import CameraAltIcon from '@mui/icons-material/CameraAlt';
+import AutorenewIcon          from '@mui/icons-material/Autorenew';
+import BugReportIcon          from '@mui/icons-material/BugReport';
+import CameraAltIcon          from '@mui/icons-material/CameraAlt';
 import FaceRetouchingNaturalIcon from '@mui/icons-material/FaceRetouchingNatural';
-import FileUploadIcon from '@mui/icons-material/FileUpload';
+import FileUploadIcon         from '@mui/icons-material/FileUpload';
 
+import useTrackingStore from './store/useTrackingStore';
+import { Scene3D }       from './components/Scene3D';
+import { WebcamTracker } from './components/WebcamTracker';
+
+// ─── Theme ────────────────────────────────────────────────────────────────────
 const darkTheme = createTheme({
   palette: {
     mode: 'dark',
-    primary: {
-      main: '#00ff88',
-    },
-    background: {
-      default: '#0b0c10',
-      paper: '#1a1c2d',
-    },
+    primary:    { main: '#00ff88' },
+    background: { default: '#0b0c10', paper: '#1a1c2d' },
   },
 });
 
-const Lights = () => {
-  return (
-    <>
-      <ambientLight intensity={0.5} />
-      <directionalLight 
-        castShadow 
-        position={[-8, 16, -8]}
-        intensity={0.6}
-      />
-      <pointLight position={[0, 50, 0]} intensity={1.5} />
-    </>
-  );
-};
-
-// Global variables to pass data smoothly to useFrame (60 FPS rendering)
-const targetPos = new THREE.Vector3(0, 0, -3);
-let targetScaleVal = 18;
-let targetRotation = new THREE.Quaternion();
-let isFaceTracked = false;
-
-// Initialize Kalman Filters for ultra-smooth tracking (Reduces jitter significantly over Lerp)
-const posFilter = new Vector3KalmanFilter(0.04, 0.005);
-const scaleFilter = new Vector3KalmanFilter(0.08, 0.01);
-// For quaternions, we'll use slerp natively as it's better suited than independent Kalman filters
-
-var manual_mode = true;
-var manual_x = 0;
-var manual_y = 0;
-var manual_z = -3;
-var manual_scale = 18;
-var manual_rotation_y = 0;
-
-// Export debug info
-let debugInfo = { 
-  templeDistance: 0, scale: 0, angleZ: 0, angleY: 0, fps: 0, eyeCenter: {x: 0, y: 0},
-  pd: 62, faceShape: 'Analyzing...', recommendations: null
-};
-let lastFrameTime = performance.now();
-let frameCount = 0;
-
-function Model({ url, ...props }) {
-  const gltf = useLoader(GLTFLoader, url);
-  const faceAnchorRef = useRef();
-  
-  // ROOT CAUSE FIX: Clone the scene on every mount.
-  // useLoader caches the GLTFLoader result, meaning gltf.scene is the SAME object
-  // reference across model switches. Without cloning:
-  //   1. We mutate the cached scene's position in-place (useEffect below),
-  //      so on the next mount it starts with corrupted transforms.
-  //   2. Three.js removes the original scene from the render graph on unmount,
-  //      making subsequent mounts of the same cached object invisible.
-  // Cloning gives each mount its own independent Three.js Object3D tree.
-  const clonedScene = useMemo(() => gltf.scene.clone(true), [gltf.scene]);
-
-  // Automatically calculate model dimensions and fix alignment on the CLONE
-  useEffect(() => {
-    if (clonedScene) {
-      const box = new THREE.Box3().setFromObject(clonedScene);
-      const center = box.getCenter(new THREE.Vector3());
-      
-      // Fix GLB alignment: glasses origin must be centered on the nose bridge
-      clonedScene.position.x = -center.x;
-      clonedScene.position.y = -center.y;
-      
-      // Z-axis alignment to sit naturally over both eyes (back of lenses)
-      clonedScene.position.z = -box.max.z + ((box.max.z - box.min.z) * 0.1); 
-    }
-
-    // Dispose the cloned scene's geometries and materials on unmount
-    // to prevent GPU memory leaks when switching models rapidly.
-    return () => {
-      clonedScene.traverse((child) => {
-        if (child.isMesh) {
-          child.geometry?.dispose();
-          if (Array.isArray(child.material)) {
-            child.material.forEach((m) => m.dispose());
-          } else {
-            child.material?.dispose();
-          }
-        }
-      });
-    };
-  }, [clonedScene]);
-
-  useFrame((state, delta) => {
-    if (!faceAnchorRef.current) return;
-    
-    // Calculate FPS
-    frameCount++;
-    const now = performance.now();
-    if (now - lastFrameTime >= 1000) {
-      debugInfo.fps = frameCount;
-      frameCount = 0;
-      lastFrameTime = now;
-    }
-    
-    if (manual_mode) {
-      faceAnchorRef.current.position.set(manual_x, manual_y, manual_z);
-      faceAnchorRef.current.scale.set(manual_scale, manual_scale, manual_scale);
-      faceAnchorRef.current.rotation.set(0, manual_rotation_y, 0);
-    } else {
-      if (isFaceTracked) {
-        // Apply configurable offsets
-        const finalTargetPos = new THREE.Vector3(
-          targetPos.x + manual_x,
-          targetPos.y + manual_y,
-          targetPos.z + (manual_z + 3) // +3 to offset the default -3 
-        );
-        
-        // Exponential smoothing / Kalman for position
-        const filteredPos = posFilter.filter(finalTargetPos);
-        faceAnchorRef.current.position.copy(filteredPos);
-        
-        // Scale dynamically using face width
-        const finalScale = (targetScaleVal / 18) * manual_scale; 
-        const targetScaleVec = new THREE.Vector3(finalScale, finalScale, finalScale);
-        const filteredScale = scaleFilter.filter(targetScaleVec);
-        faceAnchorRef.current.scale.copy(filteredScale);
-        
-        // Smooth Rotation using Slerp
-        faceAnchorRef.current.quaternion.slerp(targetRotation, 0.35);
-        
-        debugInfo.scale = finalScale;
-      } else {
-        // Fallback default coordinates if tracking is lost
-        const fallbackPos = posFilter.filter(new THREE.Vector3(0, 0, -3));
-        faceAnchorRef.current.position.copy(fallbackPos);
-        const fallbackScale = scaleFilter.filter(new THREE.Vector3(18, 18, 18));
-        faceAnchorRef.current.scale.copy(fallbackScale);
-        faceAnchorRef.current.quaternion.slerp(new THREE.Quaternion().identity(), 0.1);
-      }
-    }
-  });
-
-  return (
-    <group ref={faceAnchorRef} {...props}>
-      {/* FaceAnchor: GLB model clone attached as child to follow head movements */}
-      <FaceOccluder position={[0, -0.5, -1.5]} scale={2.5} rotationQuat={new THREE.Quaternion()} />
-      <primitive object={clonedScene} />
-    </group>
-  );
-}
-
+// ─── Model list ───────────────────────────────────────────────────────────────
 const MODELS_LIST = [
-  { id: 'bolle', name: 'Bolle Nevada Blue', path: '/translated-bolle.glb', desc: 'Stylish blue snow goggles' },
-  { id: 'anaconda', name: 'Anaconda Black', path: '/anaconda_black.glb', desc: 'Classic black sports sunglasses' },
-  { id: 'bolt', name: 'Bolt 2.0 Tortoise', path: '/bolt_2.0_turtoise.glb', desc: 'Tortoise pattern casual frame' },
-  { id: 'glass', name: 'Premium Glass', path: '/models/glass.glb', desc: 'Frameless glass design' },
-  { id: 'prize', name: 'Prize Black', path: '/models/prize_Black.glb', desc: 'Modern sport shield glasses' }
+  { id: 'bolle',    name: 'Bolle Nevada Blue',    path: '/translated-bolle.glb',    desc: 'Stylish blue snow goggles' },
+  { id: 'anaconda', name: 'Anaconda Black',        path: '/anaconda_black.glb',      desc: 'Classic black sports sunglasses' },
+  { id: 'bolt',     name: 'Bolt 2.0 Tortoise',    path: '/bolt_2.0_turtoise.glb',   desc: 'Tortoise pattern casual frame' },
+  { id: 'glass',    name: 'Premium Glass',         path: '/models/glass.glb',        desc: 'Frameless glass design' },
+  { id: 'prize',    name: 'Prize Black',           path: '/models/prize_Black.glb',  desc: 'Modern sport shield glasses' },
 ];
 
-function App() {
+// ─── App ──────────────────────────────────────────────────────────────────────
+export default function App() {
   const webcamRef = useRef(null);
-  const canvasRef = useRef(null);
 
-  const [cameraMocked, setCameraMocked] = useState(false);
-  const [mockReason, setMockReason] = useState('');
-  const [isManual, setIsManual] = useState(true); // Default to true so user has instant control
-  const [showDebug, setShowDebug] = useState(false);
-  const [selectedModel, setSelectedModel] = useState(MODELS_LIST[0]);
-  const [debugOverlayData, setDebugOverlayData] = useState({ 
-    fps: 0, scale: 0, angleZ: 0, templeDist: 0, pd: 62, faceShape: '', recs: null 
+  const [cameraMocked,   setCameraMocked]   = useState(false);
+  const [mockReason,     setMockReason]     = useState('');
+  const [isManual,       setIsManual]       = useState(true);
+  const [showDebug,      setShowDebug]      = useState(false);
+  const [selectedModel,  setSelectedModel]  = useState(MODELS_LIST[0]);
+  const [debugDisplay,   setDebugDisplay]   = useState({
+    fps: 0, scale: 0, angleY: 0, angleZ: 0, templeDist: 0, pd: 62, faceShape: '', recs: null,
   });
-  
-  // Slider states for manual control
-  const [posX, setPosX] = useState(0);
-  const [posY, setPosY] = useState(0);
-  const [posZ, setPosZ] = useState(-3);
+
+  // Manual slider state
+  const [posX,  setPosX]  = useState(0);
+  const [posY,  setPosY]  = useState(0);
+  const [posZ,  setPosZ]  = useState(-3);
   const [scale, setScale] = useState(18);
-  const [rotY, setRotY] = useState(0);
+  const [rotY,  setRotY]  = useState(0);
 
-  // Connect tracking points drawing tool
-  const connect = window.drawConnectors;
-
-  // Intercept the custom mock event dispatched by our index.js polyfill
+  // Listen for camera-fallback polyfill event from index.jsx
   useEffect(() => {
-    const handleMockActive = (e) => {
+    const h = (e) => {
       setCameraMocked(true);
-      setMockReason(e.detail.error || 'Browser getUserMedia API is unavailable');
-      setIsManual(true); // Ensure manual control is enabled
+      setMockReason(e.detail?.error || 'Camera unavailable');
+      setIsManual(true);
     };
-    window.addEventListener('camera-fallback-active', handleMockActive);
-    return () => {
-      window.removeEventListener('camera-fallback-active', handleMockActive);
-    };
+    window.addEventListener('camera-fallback-active', h);
+    return () => window.removeEventListener('camera-fallback-active', h);
   }, []);
 
-  // Sync React state values to global variables read inside useFrame
+  // Poll debug data from Zustand at ~5 Hz (no 60fps React re-renders)
   useEffect(() => {
-    manual_mode = isManual;
-  }, [isManual]);
-
-  // Update debug stats periodically so we don't spam re-renders on every frame
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (showDebug) {
-        setDebugOverlayData({
-          fps: debugInfo.fps,
-          scale: debugInfo.scale,
-          angleZ: debugInfo.angleZ,
-          angleY: debugInfo.angleY,
-          templeDist: debugInfo.templeDistance,
-          pd: debugInfo.pd,
-          faceShape: debugInfo.faceShape,
-          recs: debugInfo.recommendations
-        });
-      }
+    if (!showDebug) return;
+    const id = setInterval(() => {
+      const { debugData } = useTrackingStore.getState();
+      setDebugDisplay({
+        fps:       debugData.fps,
+        scale:     debugData.scale,
+        angleY:    debugData.angleY,
+        angleZ:    debugData.angleZ,
+        templeDist: debugData.templeDistance,
+        pd:        debugData.pd,
+        faceShape: debugData.faceShape,
+        recs:      debugData.recommendations,
+      });
     }, 200);
-    return () => clearInterval(interval);
+    return () => clearInterval(id);
   }, [showDebug]);
 
-  useEffect(() => {
-    manual_x = posX;
-    manual_y = posY;
-    manual_z = posZ;
-    manual_scale = scale;
-    manual_rotation_y = rotY;
-  }, [posX, posY, posZ, scale, rotY]);
-
-  // Reset sliders to default values
   const handleResetSliders = () => {
-    setPosX(0);
-    setPosY(0);
-    setPosZ(-3);
-    setScale(18);
-    setRotY(0);
+    setPosX(0); setPosY(0); setPosZ(-3); setScale(18); setRotY(0);
   };
 
-  // Capture System - Generates Screenshot for Download
-  const handleScreenshot = () => {
-    if (!webcamRef.current || !canvasRef.current) return;
-    
-    // Find the active WebGL React Three Fiber Canvas
+  const handleScreenshot = useCallback(() => {
+    const video = webcamRef.current?.video;
+    if (!video) return;
     const threeCanvas = document.querySelector('.canvas-wrapper canvas');
     if (!threeCanvas) return;
-    
-    const captureCanvas = document.createElement('canvas');
-    captureCanvas.width = webcamRef.current.video.videoWidth;
-    captureCanvas.height = webcamRef.current.video.videoHeight;
-    const ctx = captureCanvas.getContext('2d');
-    
-    // 1. Draw mirrored webcam frame
-    ctx.translate(captureCanvas.width, 0);
+
+    const cap = document.createElement('canvas');
+    cap.width  = video.videoWidth;
+    cap.height = video.videoHeight;
+    const ctx  = cap.getContext('2d');
+    ctx.translate(cap.width, 0);
     ctx.scale(-1, 1);
-    ctx.drawImage(webcamRef.current.video, 0, 0, captureCanvas.width, captureCanvas.height);
-    
-    // 2. Overlay 3D scene (reset transform as 3D canvas handles mirror internally)
+    ctx.drawImage(video, 0, 0, cap.width, cap.height);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.drawImage(threeCanvas, 0, 0, captureCanvas.width, captureCanvas.height);
-    
-    // 3. Trigger native download
-    const link = document.createElement('a');
-    link.download = `lenskart-fit-${new Date().getTime()}.png`;
-    link.href = captureCanvas.toDataURL('image/png');
-    link.click();
-  };
+    ctx.drawImage(threeCanvas, 0, 0, cap.width, cap.height);
+
+    const a = document.createElement('a');
+    a.download = `vto-${Date.now()}.png`;
+    a.href     = cap.toDataURL('image/png');
+    a.click();
+  }, []);
 
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
     const url = URL.createObjectURL(file);
     if (file.type.startsWith('video/')) {
-      const video = document.createElement('video');
-      video.src = url;
-      video.loop = true;
-      video.muted = true;
-      video.play().catch(console.error);
-      window.mockMediaElement = video;
-      setIsManual(false); // Switch back to AI Tracking mode for the uploaded media
-    } else if (file.type.startsWith('image/')) {
-      const img = new Image();
-      img.src = url;
-      img.onload = () => {
-        window.mockMediaElement = img;
-        setIsManual(false); // Switch back to AI Tracking mode
-      };
-    }
-  };
-
-  const faceLandmarkerRef = useRef(null);
-  const requestRef = useRef(null);
-
-  function onResults(results) {
-    if (results.faceLandmarks && results.faceLandmarks.length > 0) {
-      isFaceTracked = true;
-      const landmarks = results.faceLandmarks[0];
-      
-      // Target specific landmarks
-      const leftEye = landmarks[33]; 
-      const rightEye = landmarks[263]; 
-      const leftTemple = landmarks[234];
-      const rightTemple = landmarks[454];
-
-      // Position FaceAnchor using the eye center
-      const eyeCenterX = (leftEye.x + rightEye.x) / 2;
-      const eyeCenterY = (leftEye.y + rightEye.y) / 2;
-      
-      // Mirror X for selfie mode
-      const mirroredEyeCenterX = 1.0 - eyeCenterX;
-
-      debugInfo.eyeCenter = { x: mirroredEyeCenterX, y: eyeCenterY };
-
-      // Map normalized coordinates to 3D space
-      targetPos.x = (mirroredEyeCenterX - 0.5) * 10;
-      targetPos.y = -(eyeCenterY - 0.5) * 7.5;
-
-      // Scale glasses dynamically using face width
-      const templeDistance = Math.hypot(rightTemple.x - leftTemple.x, rightTemple.y - leftTemple.y);
-      debugInfo.templeDistance = templeDistance;
-      targetScaleVal = templeDistance * 45;
-
-      // Use facialTransformationMatrixes to drive head rotation, tilt, forward/backward movement
-      if (results.facialTransformationMatrixes && results.facialTransformationMatrixes.length > 0) {
-        const matrixData = results.facialTransformationMatrixes[0].data;
-        const matrix = new THREE.Matrix4().fromArray(matrixData);
-        
-        // Convert MediaPipe transformation matrix to Three.js Matrix4
-        // The raw matrix implicitly handles selfie-mode mirror conversion when applied directly 
-        // to a Three.js Quaternion (as it effectively flips the relevant axes).
-        const rotation = new THREE.Quaternion().setFromRotationMatrix(matrix);
-        targetRotation.copy(rotation);
-        
-        // Forward/backward movement from translation Z
-        const matrixPosition = new THREE.Vector3().setFromMatrixPosition(matrix);
-        // Map MediaPipe Z depth to Three.js space
-        targetPos.z = -(matrixPosition.z / 10) - 1.5; 
-
-        // Update debug angles (approximate from quaternion)
-        const euler = new THREE.Euler().setFromQuaternion(rotation);
-        debugInfo.angleZ = euler.z;
-        debugInfo.angleY = euler.y;
-      }
-
-      // Face Shape & PD
-      const currentPd = calculatePD(landmarks);
-      const currentShape = detectFaceShape(landmarks);
-      debugInfo.pd = Math.round(currentPd);
-      debugInfo.faceShape = currentShape;
-      debugInfo.recommendations = getFrameRecommendations(currentShape);
-
+      const v = Object.assign(document.createElement('video'), { src: url, loop: true, muted: true });
+      v.play().catch(console.error);
+      window.mockMediaElement = v;
     } else {
-      isFaceTracked = false;
+      const img = new Image();
+      img.onload = () => { window.mockMediaElement = img; };
+      img.src = url;
     }
-
-    if (canvasRef.current && webcamRef.current && webcamRef.current.video) {
-      canvasRef.current.width = webcamRef.current.video.videoWidth;
-      canvasRef.current.height = webcamRef.current.video.videoHeight;
-      const canvasCtx = canvasRef.current.getContext("2d");
-      
-      canvasCtx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-      // We don't draw the raw image here since react-webcam already renders it nicely with CSS mirroring.
-      
-      if (results.faceLandmarks && showDebug) {
-        for (const landmarks of results.faceLandmarks) {
-          const debugLandmarks = [33, 263, 168, 234, 454];
-          canvasCtx.fillStyle = '#ff3366';
-          for (let i of debugLandmarks) {
-            const lm = landmarks[i];
-            // Mirror X on canvas to align with mirrored webcam
-            const mirroredX = 1.0 - lm.x;
-            canvasCtx.beginPath();
-            canvasCtx.arc(mirroredX * canvasRef.current.width, lm.y * canvasRef.current.height, 4, 0, 2 * Math.PI);
-            canvasCtx.fill();
-            
-            canvasCtx.fillStyle = '#ffffff';
-            canvasCtx.font = '10px Arial';
-            canvasCtx.fillText(`L${i}`, mirroredX * canvasRef.current.width + 5, lm.y * canvasRef.current.height - 5);
-            canvasCtx.fillStyle = '#ff3366';
-          }
-        }
-      }
-    }
-  }
-
-  const renderLoop = () => {
-    if (
-      webcamRef.current &&
-      webcamRef.current.video &&
-      webcamRef.current.video.readyState >= 2 &&
-      faceLandmarkerRef.current
-    ) {
-      const video = webcamRef.current.video;
-      // Ensure we process new frames only
-      if (video.currentTime !== video.lastProcessedTime) {
-        video.lastProcessedTime = video.currentTime;
-        const startTimeMs = performance.now();
-        const results = faceLandmarkerRef.current.detectForVideo(video, startTimeMs);
-        onResults(results);
-      }
-    }
-    requestRef.current = requestAnimationFrame(renderLoop);
+    setIsManual(false);
   };
 
-  useEffect(() => {
-    let active = true;
-
-    const setupMediaPipe = async () => {
-      try {
-        const filesetResolver = await FilesetResolver.forVisionTasks(
-          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
-        );
-        if (!active) return;
-
-        const faceLandmarker = await FaceLandmarker.createFromOptions(filesetResolver, {
-          baseOptions: {
-            modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
-            delegate: "GPU"
-          },
-          outputFaceBlendshapes: true,
-          outputFacialTransformationMatrixes: true,
-          runningMode: "VIDEO",
-          numFaces: 1
-        });
-        
-        faceLandmarkerRef.current = faceLandmarker;
-        requestRef.current = requestAnimationFrame(renderLoop);
-      } catch (err) {
-        console.error("MediaPipe initialization failed: ", err);
-        setCameraMocked(true);
-        setMockReason(err.message || 'FaceLandmarker failed to load');
-        setIsManual(true);
-      }
-    };
-
-    setupMediaPipe();
-
-    return () => {
-      active = false;
-      if (faceLandmarkerRef.current) {
-        faceLandmarkerRef.current.close();
-      }
-      if (requestRef.current) {
-        cancelAnimationFrame(requestRef.current);
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Offsets passed to TrackingService for fine-tuning
+  const manualOffsets = { x: posX, y: posY, z: posZ - (-3), scale };
 
   return (
     <ThemeProvider theme={darkTheme}>
-      <Grid container direction="column" sx={{ minHeight: "100vh" }}>
-        <Grid item xs={12}>
-          <Header />
-        </Grid>
-        
+      <Grid container direction="column" sx={{ minHeight: '100vh' }}>
+
+        <Grid item xs={12}><Header /></Grid>
+
         <Grid item container sx={{ p: { xs: 2, md: 4 }, flexGrow: 1, gap: 3 }} justifyContent="center">
-          
-          {/* Main Visualizer Panel */}
+
+          {/* ── Visualizer Panel ─────────────────────────────────────────── */}
           <Grid item xs={12} md={7} lg={7}>
-            <Box className="outer-div" sx={{ position: 'relative' }}>
-              <Webcam 
-                ref={webcamRef} 
-                className="webcam-wrapper" 
-                mirrored={true} 
-                audio={false}
-                screenshotFormat="image/jpeg"
+            <Box
+              className="outer-div"
+              sx={{ position: 'relative', width: '100%', paddingTop: '56.25%' /* 16:9 */ }}
+            >
+              {/* Webcam layer + MediaPipe tracking */}
+              <WebcamTracker
+                webcamRef={webcamRef}
+                manualOffsets={manualOffsets}
+                enabled={!isManual}
               />
-              <canvas hidden={!showDebug} className="responsive-canvas" ref={canvasRef} style={{ zIndex: 9, opacity: showDebug ? 0.7 : 0 }} />
-              <Canvas gl={{ preserveDrawingBuffer: true }} className="canvas-wrapper">
-                <Lights />
-                <Suspense fallback={null}>
-                  <Model key={selectedModel.id} url={selectedModel.path} position={[0, 0, -3]} />
-                  <OrbitControls enableZoom={true} />
-                </Suspense>
-              </Canvas>
+
+              {/* Three.js overlay */}
+              <Scene3D
+                modelUrl={selectedModel.path}
+                modelKey={selectedModel.id}
+                showDebug={showDebug}
+                isManual={isManual}
+                manualX={posX}
+                manualY={posY}
+                manualZ={posZ}
+                manualScale={scale}
+                manualRotY={rotY}
+              />
             </Box>
-            
+
+            {/* Status row */}
             <Box sx={{ mt: 2, display: 'flex', gap: 2, justifyContent: 'center', flexWrap: 'wrap' }}>
               {cameraMocked ? (
                 <Box className="status-badge status-warning">
-                  <SecurityIcon fontSize="small" />
-                  Simulated Camera Feed Active
+                  <SecurityIcon fontSize="small" /> Simulated Camera Feed Active
                 </Box>
               ) : (
                 <Box className="status-badge status-active">
-                  <CheckCircleOutlineIcon fontSize="small" />
-                  Hardware Camera Active
+                  <CheckCircleOutlineIcon fontSize="small" /> Hardware Camera Active
                 </Box>
               )}
-              <Button 
-                variant={showDebug ? "contained" : "outlined"}
-                color="secondary"
-                size="small"
-                startIcon={<BugReportIcon />}
-                onClick={() => setShowDebug(!showDebug)}
-                sx={{ borderRadius: '20px', textTransform: 'none' }}
-              >
-                Developer Debug Mode
+
+              <Button variant={showDebug ? 'contained' : 'outlined'} color="secondary" size="small"
+                startIcon={<BugReportIcon />} onClick={() => setShowDebug(!showDebug)}
+                sx={{ borderRadius: '20px', textTransform: 'none' }}>
+                Debug Mode
               </Button>
-              <Button 
-                variant="contained" 
-                color="primary"
-                size="small"
-                onClick={handleScreenshot}
-                startIcon={<CameraAltIcon />}
-                sx={{ borderRadius: '20px', textTransform: 'none', ml: 1, boxShadow: '0 0 10px rgba(0,255,136,0.3)' }}
-              >
+
+              <Button variant="contained" color="primary" size="small"
+                onClick={handleScreenshot} startIcon={<CameraAltIcon />}
+                sx={{ borderRadius: '20px', textTransform: 'none', boxShadow: '0 0 10px rgba(0,255,136,0.3)' }}>
                 Capture Fit
               </Button>
+
               {cameraMocked && (
-                <Button
-                  component="label"
-                  variant="outlined"
-                  size="small"
+                <Button component="label" variant="outlined" size="small"
                   startIcon={<FileUploadIcon />}
-                  sx={{ borderRadius: '20px', textTransform: 'none', ml: 1, color: '#00ff88', borderColor: '#00ff88' }}
-                >
+                  sx={{ borderRadius: '20px', textTransform: 'none', color: '#00ff88', borderColor: '#00ff88' }}>
                   Upload Media
-                  <input
-                    type="file"
-                    hidden
-                    accept="image/*,video/*"
-                    onChange={handleFileUpload}
-                  />
+                  <input type="file" hidden accept="image/*,video/*" onChange={handleFileUpload} />
                 </Button>
               )}
             </Box>
 
-            {/* Debug Overlay */}
+            {/* Debug overlay */}
             {showDebug && (
-              <Box sx={{ 
-                mt: 2, 
-                p: 2, 
-                backgroundColor: 'rgba(20, 25, 40, 0.8)', 
-                border: '1px solid rgba(100, 150, 255, 0.2)',
-                borderRadius: '8px',
-                backdropFilter: 'blur(10px)',
-                display: 'grid',
-                gridTemplateColumns: '1fr 1fr',
-                gap: 2
+              <Box sx={{
+                mt: 2, p: 2, backgroundColor: 'rgba(20,25,40,0.8)',
+                border: '1px solid rgba(100,150,255,0.2)', borderRadius: '8px',
+                backdropFilter: 'blur(10px)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2,
               }}>
-                <Box>
-                  <Typography variant="caption" color="text.secondary">FPS</Typography>
-                  <Typography variant="body2" fontWeight="bold" color={debugOverlayData.fps < 30 ? "error.main" : "primary.main"}>
-                    {debugOverlayData.fps}
-                  </Typography>
-                </Box>
-                <Box>
-                  <Typography variant="caption" color="text.secondary">Scale</Typography>
-                  <Typography variant="body2" fontWeight="bold" color="white">
-                    {debugOverlayData.scale.toFixed(2)}
-                  </Typography>
-                </Box>
-                <Box>
-                  <Typography variant="caption" color="text.secondary">Face Z-Angle</Typography>
-                  <Typography variant="body2" fontWeight="bold" color="white">
-                    {((debugOverlayData.angleZ * 180) / Math.PI).toFixed(1)}°
-                  </Typography>
-                </Box>
-                <Box>
-                  <Typography variant="caption" color="text.secondary">Temple Distance</Typography>
-                  <Typography variant="body2" fontWeight="bold" color="white">
-                    {debugOverlayData.templeDist.toFixed(3)}
-                  </Typography>
-                </Box>
+                {[
+                  ['FPS',           debugDisplay.fps, debugDisplay.fps < 30 ? 'error.main' : 'primary.main'],
+                  ['Scale',         debugDisplay.scale?.toFixed(2), 'white'],
+                  ['Head Y°',       ((debugDisplay.angleY || 0) * 180 / Math.PI).toFixed(1) + '°', 'white'],
+                  ['Temple Dist',   debugDisplay.templeDist?.toFixed(3), 'white'],
+                  ['PD (mm)',       debugDisplay.pd, 'white'],
+                  ['Face Shape',    debugDisplay.faceShape, '#00ff88'],
+                ].map(([label, val, color]) => (
+                  <Box key={label}>
+                    <Typography variant="caption" color="text.secondary">{label}</Typography>
+                    <Typography variant="body2" fontWeight="bold" color={color}>{val}</Typography>
+                  </Box>
+                ))}
               </Box>
             )}
-
           </Grid>
-          
-          {/* Controls and Customizations Panel */}
+
+          {/* ── Configurator Panel ───────────────────────────────────────── */}
           <Grid item xs={12} md={4} lg={4}>
             <Card className="glass-panel" sx={{ height: '100%', background: 'transparent' }}>
               <CardContent sx={{ p: 0 }}>
-                <Typography variant="h5" fontWeight="700" sx={{ mb: 2, color: '#ffffff', display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Typography variant="h5" fontWeight="700"
+                  sx={{ mb: 2, color: '#ffffff', display: 'flex', alignItems: 'center', gap: 1 }}>
                   <TuneIcon color="primary" /> Glasses Configurator
                 </Typography>
-                
-                {/* AI Recommendation Panel */}
-                {!isManual && debugOverlayData.recs && (
-                  <Alert 
-                    icon={<FaceRetouchingNaturalIcon />} 
-                    severity="info" 
-                    sx={{ mb: 2, borderRadius: '10px', backgroundColor: 'rgba(0, 255, 136, 0.08)', border: '1px solid rgba(0, 255, 136, 0.2)', color: '#fff' }}
-                  >
-                    <Typography variant="subtitle2" fontWeight="bold">Detected Face: {debugOverlayData.faceShape}</Typography>
-                    <Typography variant="caption" sx={{ opacity: 0.8 }}>PD: {debugOverlayData.pd}mm • {debugOverlayData.recs.desc}</Typography>
+
+                {/* AI Recommendation */}
+                {!isManual && debugDisplay.recs && (
+                  <Alert icon={<FaceRetouchingNaturalIcon />} severity="info"
+                    sx={{ mb: 2, borderRadius: '10px', backgroundColor: 'rgba(0,255,136,0.08)',
+                      border: '1px solid rgba(0,255,136,0.2)', color: '#fff' }}>
+                    <Typography variant="subtitle2" fontWeight="bold">
+                      Detected Face: {debugDisplay.faceShape}
+                    </Typography>
+                    <Typography variant="caption" sx={{ opacity: 0.8 }}>
+                      PD: {debugDisplay.pd}mm · {debugDisplay.recs.desc}
+                    </Typography>
                     <Typography variant="caption" sx={{ display: 'block', mt: 0.5, color: '#00ff88', fontWeight: 'bold' }}>
-                      Recommended: {debugOverlayData.recs.best.join(', ')}
+                      Recommended: {debugDisplay.recs.best.join(', ')}
                     </Typography>
                   </Alert>
                 )}
 
                 {cameraMocked && (
-                  <Alert severity="warning" sx={{ mb: 2, borderRadius: '10px', backgroundColor: 'rgba(255, 153, 0, 0.08)', border: '1px solid rgba(255, 153, 0, 0.2)' }}>
-                    Camera access blocked or unsupported ({mockReason}). Using simulated feed and manual mode.
+                  <Alert severity="warning" sx={{ mb: 2, borderRadius: '10px',
+                    backgroundColor: 'rgba(255,153,0,0.08)', border: '1px solid rgba(255,153,0,0.2)' }}>
+                    Camera blocked ({mockReason}). Using simulated feed.
                   </Alert>
                 )}
 
@@ -645,135 +266,77 @@ function App() {
                   {MODELS_LIST.map((model) => (
                     <Grid item xs={6} key={model.id}>
                       <Tooltip title={model.desc} placement="top">
-                        <Box 
+                        <Box
                           className={`model-card ${selectedModel.id === model.id ? 'active' : ''}`}
                           onClick={() => setSelectedModel(model)}
                         >
-                          <Typography variant="body2" fontWeight="600">
-                            {model.name}
-                          </Typography>
+                          <Typography variant="body2" fontWeight="600">{model.name}</Typography>
                         </Box>
                       </Tooltip>
                     </Grid>
                   ))}
                 </Grid>
-                
+
                 <Divider sx={{ my: 2, borderColor: 'rgba(255,255,255,0.08)' }} />
-                
-                {/* Mode Controller */}
+
+                {/* Mode Toggle */}
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                   <Typography variant="subtitle2" sx={{ color: '#888bc4', fontWeight: '600' }}>
                     TRACKING MODE
                   </Typography>
                   <FormControlLabel
-                    control={
-                      <Switch 
-                        checked={isManual} 
-                        onChange={(e) => setIsManual(e.target.checked)} 
-                        color="primary"
-                      />
-                    }
-                    label={isManual ? "Manual Control" : "AI Face Tracking"}
+                    control={<Switch checked={isManual} onChange={(e) => setIsManual(e.target.checked)} color="primary" />}
+                    label={isManual ? 'Manual Control' : 'AI Face Tracking'}
                     sx={{ color: '#ffffff' }}
                   />
                 </Box>
-                
-                {/* Manual Sliders (Now act as offsets for AI Tracking as well) */}
-                <Box sx={{ pointerEvents: 'auto', transition: 'all 0.3s ease' }}>
-                  <Typography variant="caption" sx={{ display: 'block', mb: 2, color: '#888bc4' }}>
-                    {isManual ? "Use sliders to place the glasses." : "Use sliders to fine-tune offsets for the AI tracking."}
-                  </Typography>
-                  <Stack spacing={2} className="slider-container">
+
+                <Typography variant="caption" sx={{ display: 'block', mb: 2, color: '#888bc4' }}>
+                  {isManual
+                    ? 'Use sliders to place the glasses.'
+                    : 'Sliders act as fine-tune offsets on top of AI tracking.'}
+                </Typography>
+
+                {/* Sliders */}
+                <Stack spacing={2} className="slider-container">
+                  {[
+                    { label: 'Position X (Left/Right)', val: posX, set: setPosX, min: -5, max: 5, step: 0.05, fmt: (v) => v.toFixed(2) },
+                    { label: 'Position Y (Up/Down)',    val: posY, set: setPosY, min: -5, max: 5, step: 0.05, fmt: (v) => v.toFixed(2) },
+                    { label: 'Position Z (Depth)',      val: posZ, set: setPosZ, min: -10, max: 5, step: 0.1, fmt: (v) => v.toFixed(2) },
+                    { label: 'Scale (Size)',            val: scale, set: setScale, min: 5, max: 40, step: 0.5, fmt: (v) => v.toFixed(1) },
+                  ].map(({ label, val, set, min, max, step, fmt }) => (
+                    <Box key={label}>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <Typography variant="caption" sx={{ color: '#c5c6c7' }}>{label}</Typography>
+                        <Typography variant="caption" fontWeight="600" color="primary">{fmt(val)}</Typography>
+                      </Box>
+                      <Slider value={val} min={min} max={max} step={step} onChange={(_, v) => set(v)} />
+                    </Box>
+                  ))}
+
+                  {isManual && (
                     <Box>
                       <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <Typography variant="caption" sx={{ color: '#c5c6c7' }}>Position X (Left / Right) {!isManual && 'Offset'}</Typography>
-                        <Typography variant="caption" fontWeight="600" color="primary">{posX.toFixed(2)}</Typography>
+                        <Typography variant="caption" sx={{ color: '#c5c6c7' }}>Angle (Rotation Y)</Typography>
+                        <Typography variant="caption" fontWeight="600" color="primary">
+                          {((rotY * 180) / Math.PI).toFixed(0)}°
+                        </Typography>
                       </Box>
-                      <Slider 
-                        value={posX} 
-                        min={-5} 
-                        max={5} 
-                        step={0.05} 
-                        onChange={(e, val) => setPosX(val)} 
-                      />
+                      <Slider value={rotY} min={-Math.PI} max={Math.PI} step={0.05} onChange={(_, v) => setRotY(v)} />
                     </Box>
+                  )}
 
-                    <Box>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <Typography variant="caption" sx={{ color: '#c5c6c7' }}>Position Y (Up / Down) {!isManual && 'Offset'}</Typography>
-                        <Typography variant="caption" fontWeight="600" color="primary">{posY.toFixed(2)}</Typography>
-                      </Box>
-                      <Slider 
-                        value={posY} 
-                        min={-5} 
-                        max={5} 
-                        step={0.05} 
-                        onChange={(e, val) => setPosY(val)} 
-                      />
-                    </Box>
-
-                    <Box>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <Typography variant="caption" sx={{ color: '#c5c6c7' }}>Position Z (Depth) {!isManual && 'Offset'}</Typography>
-                        <Typography variant="caption" fontWeight="600" color="primary">{posZ.toFixed(2)}</Typography>
-                      </Box>
-                      <Slider 
-                        value={posZ} 
-                        min={-10} 
-                        max={5} 
-                        step={0.1} 
-                        onChange={(e, val) => setPosZ(val)} 
-                      />
-                    </Box>
-
-                    <Box>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <Typography variant="caption" sx={{ color: '#c5c6c7' }}>Scale (Size) {!isManual && 'Modifier'}</Typography>
-                        <Typography variant="caption" fontWeight="600" color="primary">{scale.toFixed(1)}</Typography>
-                      </Box>
-                      <Slider 
-                        value={scale} 
-                        min={5} 
-                        max={40} 
-                        step={0.5} 
-                        onChange={(e, val) => setScale(val)} 
-                      />
-                    </Box>
-
-                    <Box sx={{ display: isManual ? 'block' : 'none' }}>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <Typography variant="caption" sx={{ color: '#c5c6c7' }}>Angle (Rotation)</Typography>
-                        <Typography variant="caption" fontWeight="600" color="primary">{((rotY * 180) / Math.PI).toFixed(0)}°</Typography>
-                      </Box>
-                      <Slider 
-                        value={rotY} 
-                        min={-Math.PI} 
-                        max={Math.PI} 
-                        step={0.05} 
-                        onChange={(e, val) => setRotY(val)} 
-                      />
-                    </Box>
-
-                    <Button 
-                      variant="outlined" 
-                      className="neon-btn"
-                      onClick={handleResetSliders}
-                      startIcon={<AutorenewIcon />}
-                      fullWidth
-                      sx={{ mt: 2 }}
-                    >
-                      Reset Placement
-                    </Button>
-                  </Stack>
-                </Box>
+                  <Button variant="outlined" className="neon-btn" onClick={handleResetSliders}
+                    startIcon={<AutorenewIcon />} fullWidth sx={{ mt: 2 }}>
+                    Reset Placement
+                  </Button>
+                </Stack>
               </CardContent>
             </Card>
           </Grid>
-          
+
         </Grid>
       </Grid>
     </ThemeProvider>
   );
 }
-
-export default App;
