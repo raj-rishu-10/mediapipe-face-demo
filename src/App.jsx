@@ -1,9 +1,7 @@
 import './App.css';
-const FaceMesh = window.FaceMesh;
-const Facemesh = window;
-const cam = { Camera: window.Camera };
 import Webcam from "react-webcam";
 import { useRef, useEffect, useState } from 'react';
+import { FaceLandmarker, FilesetResolver } from "@mediapipe/tasks-vision";
 import { ThemeProvider, createTheme } from "@mui/material/styles";
 import {
   Grid,
@@ -68,14 +66,13 @@ const Lights = () => {
 // Global variables to pass data smoothly to useFrame (60 FPS rendering)
 const targetPos = new THREE.Vector3(0, 0, -3);
 let targetScaleVal = 18;
-let targetRotX = 0;
-let targetRotY = 0;
-let targetRotZ = 0;
+let targetRotation = new THREE.Quaternion();
 let isFaceTracked = false;
 
 // Initialize Kalman Filters for ultra-smooth tracking (Reduces jitter significantly over Lerp)
 const posFilter = new Vector3KalmanFilter(0.04, 0.005);
 const scaleFilter = new Vector3KalmanFilter(0.08, 0.01);
+// For quaternions, we'll use slerp natively as it's better suited than independent Kalman filters
 
 var manual_mode = true;
 var manual_x = 0;
@@ -94,27 +91,25 @@ let frameCount = 0;
 
 function Model({ url, ...props }) {
   const gltf = useLoader(GLTFLoader, url);
-  const groupRef = useRef();
+  const faceAnchorRef = useRef();
   
-  // Automatically calculate model dimensions and recenter
+  // Automatically calculate model dimensions and fix alignment
   useEffect(() => {
     if (gltf.scene) {
       const box = new THREE.Box3().setFromObject(gltf.scene);
       const center = box.getCenter(new THREE.Vector3());
       
-      // Recenter model automatically (bridge of glasses to 0,0)
+      // Fix GLB alignment: glasses origin must be centered on the nose bridge
       gltf.scene.position.x = -center.x;
       gltf.scene.position.y = -center.y;
       
-      // Critical fix for "not set on the face": 
-      // Geometric center pushes glasses with long temples forward.
-      // We align the Z-axis to the front of the lenses (max.z) instead of the center!
+      // Z-axis alignment to sit naturally over both eyes (back of lenses)
       gltf.scene.position.z = -box.max.z + ((box.max.z - box.min.z) * 0.1); 
     }
   }, [gltf.scene]);
 
   useFrame((state, delta) => {
-    if (!groupRef.current) return;
+    if (!faceAnchorRef.current) return;
     
     // Calculate FPS
     frameCount++;
@@ -126,50 +121,46 @@ function Model({ url, ...props }) {
     }
     
     if (manual_mode) {
-      groupRef.current.position.set(manual_x, manual_y, manual_z);
-      groupRef.current.scale.set(manual_scale, manual_scale, manual_scale);
-      groupRef.current.rotation.set(0, manual_rotation_y, 0);
+      faceAnchorRef.current.position.set(manual_x, manual_y, manual_z);
+      faceAnchorRef.current.scale.set(manual_scale, manual_scale, manual_scale);
+      faceAnchorRef.current.rotation.set(0, manual_rotation_y, 0);
     } else {
       if (isFaceTracked) {
-        // Apply configurable offsets (using the manual sliders as fine-tuning offsets in AI mode)
+        // Apply configurable offsets
         const finalTargetPos = new THREE.Vector3(
           targetPos.x + manual_x,
           targetPos.y + manual_y,
           targetPos.z + (manual_z + 3) // +3 to offset the default -3 
         );
         
-        // Smoothing using True Kalman Filter for position and scale
+        // Exponential smoothing / Kalman for position
         const filteredPos = posFilter.filter(finalTargetPos);
-        groupRef.current.position.copy(filteredPos);
+        faceAnchorRef.current.position.copy(filteredPos);
         
-        // Dynamic Scale via Kalman
-        // The scale slider provides a base relative size (around 18), we multiply it by our dynamic face scale factor
+        // Scale dynamically using face width
         const finalScale = (targetScaleVal / 18) * manual_scale; 
         const targetScaleVec = new THREE.Vector3(finalScale, finalScale, finalScale);
         const filteredScale = scaleFilter.filter(targetScaleVec);
-        groupRef.current.scale.copy(filteredScale);
+        faceAnchorRef.current.scale.copy(filteredScale);
         
-        // Smooth Rotation (Slerp remains superior for Quaternions)
-        const targetEuler = new THREE.Euler(targetRotX, targetRotY, targetRotZ, 'XYZ');
-        const targetQuat = new THREE.Quaternion().setFromEuler(targetEuler);
-        groupRef.current.quaternion.slerp(targetQuat, 0.35);
+        // Smooth Rotation using Slerp
+        faceAnchorRef.current.quaternion.slerp(targetRotation, 0.35);
         
-        // Update debug info
         debugInfo.scale = finalScale;
       } else {
         // Fallback default coordinates if tracking is lost
         const fallbackPos = posFilter.filter(new THREE.Vector3(0, 0, -3));
-        groupRef.current.position.copy(fallbackPos);
+        faceAnchorRef.current.position.copy(fallbackPos);
         const fallbackScale = scaleFilter.filter(new THREE.Vector3(18, 18, 18));
-        groupRef.current.scale.copy(fallbackScale);
-        groupRef.current.quaternion.slerp(new THREE.Quaternion().identity(), 0.1);
+        faceAnchorRef.current.scale.copy(fallbackScale);
+        faceAnchorRef.current.quaternion.slerp(new THREE.Quaternion().identity(), 0.1);
       }
     }
   });
 
   return (
-    <group ref={groupRef} {...props}>
-      {/* FaceOccluder hides the back temples behind the ears automatically */}
+    <group ref={faceAnchorRef} {...props}>
+      {/* FaceAnchor logic: GLB model attached as child to follow head movements smoothly */}
       <FaceOccluder position={[0, -0.5, -1.5]} scale={2.5} rotationQuat={new THREE.Quaternion()} />
       <primitive object={gltf.scene} />
     </group>
@@ -312,59 +303,63 @@ function App() {
     }
   };
 
+  const faceLandmarkerRef = useRef(null);
+  const requestRef = useRef(null);
+
   function onResults(results) {
-    if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+    if (results.faceLandmarks && results.faceLandmarks.length > 0) {
       isFaceTracked = true;
-      const landmarks = results.multiFaceLandmarks[0];
+      const landmarks = results.faceLandmarks[0];
       
       // Target specific landmarks
       const leftEye = landmarks[33]; 
       const rightEye = landmarks[263]; 
       const leftTemple = landmarks[234];
       const rightTemple = landmarks[454];
-      const noseBridge = landmarks[168];
 
-      // 2. Position Calculation
-      // Calculate eye center (primary anchor)
+      // Position FaceAnchor using the eye center
       const eyeCenterX = (leftEye.x + rightEye.x) / 2;
       const eyeCenterY = (leftEye.y + rightEye.y) / 2;
-      const eyeCenterZ = (leftEye.z + rightEye.z) / 2;
+      
+      // Mirror X for selfie mode
+      const mirroredEyeCenterX = 1.0 - eyeCenterX;
 
-      debugInfo.eyeCenter = { x: eyeCenterX, y: eyeCenterY };
+      debugInfo.eyeCenter = { x: mirroredEyeCenterX, y: eyeCenterY };
 
-      // Map mapped points to 3D coordinate space mapping 16:9 
-      targetPos.x = (eyeCenterX - 0.5) * 10;
+      // Map normalized coordinates to 3D space
+      targetPos.x = (mirroredEyeCenterX - 0.5) * 10;
       targetPos.y = -(eyeCenterY - 0.5) * 7.5;
-      targetPos.z = -(noseBridge.z) * 10;
 
-      // 3. Dynamic Scaling 
+      // Scale glasses dynamically using face width
       const templeDistance = Math.hypot(rightTemple.x - leftTemple.x, rightTemple.y - leftTemple.y);
       debugInfo.templeDistance = templeDistance;
-      
-      // Calculate scale relative to temple distance (multiplier tuned for normal face distance)
-      targetScaleVal = templeDistance * 45; 
+      targetScaleVal = templeDistance * 45;
 
-      // 4. Rotation Calculations
-      // Z Rotation (Head tilt)
-      const angleZ = Math.atan2(rightTemple.y - leftTemple.y, rightTemple.x - leftTemple.x);
-      targetRotZ = -angleZ; 
-      debugInfo.angleZ = angleZ;
+      // Use facialTransformationMatrixes to drive head rotation, tilt, forward/backward movement
+      if (results.facialTransformationMatrixes && results.facialTransformationMatrixes.length > 0) {
+        const matrixData = results.facialTransformationMatrixes[0].data;
+        const matrix = new THREE.Matrix4().fromArray(matrixData);
+        
+        // Convert MediaPipe transformation matrix to Three.js Matrix4
+        // The raw matrix implicitly handles selfie-mode mirror conversion when applied directly 
+        // to a Three.js Quaternion (as it effectively flips the relevant axes).
+        const rotation = new THREE.Quaternion().setFromRotationMatrix(matrix);
+        targetRotation.copy(rotation);
+        
+        // Forward/backward movement from translation Z
+        const matrixPosition = new THREE.Vector3().setFromMatrixPosition(matrix);
+        // Map MediaPipe Z depth to Three.js space
+        targetPos.z = -(matrixPosition.z / 10) - 1.5; 
 
-      // Y Rotation (Head turn left/right)
-      const angleY = Math.asin((rightTemple.z - leftTemple.z) / templeDistance);
-      targetRotY = angleY;
-      debugInfo.angleY = angleY;
+        // Update debug angles (approximate from quaternion)
+        const euler = new THREE.Euler().setFromQuaternion(rotation);
+        debugInfo.angleZ = euler.z;
+        debugInfo.angleY = euler.y;
+      }
 
-      // X Rotation (Head tilt up/down)
-      const faceHeight = Math.hypot(landmarks[152].x - landmarks[10].x, landmarks[152].y - landmarks[10].y);
-      const angleX = Math.asin((noseBridge.z - landmarks[152].z) / faceHeight);
-      targetRotX = angleX - 0.1; // mild offset for glasses resting angle
-
-      // 5. Face Shape & PD (analyzed passively for AI Recommendations)
+      // Face Shape & PD
       const currentPd = calculatePD(landmarks);
       const currentShape = detectFaceShape(landmarks);
-      
-      // Update global debug info dynamically
       debugInfo.pd = Math.round(currentPd);
       debugInfo.faceShape = currentShape;
       debugInfo.recommendations = getFrameRecommendations(currentShape);
@@ -376,85 +371,92 @@ function App() {
     if (canvasRef.current && webcamRef.current && webcamRef.current.video) {
       canvasRef.current.width = webcamRef.current.video.videoWidth;
       canvasRef.current.height = webcamRef.current.video.videoHeight;
-
-      const canvasElement = canvasRef.current;
-      const canvasCtx = canvasElement.getContext("2d");
-      canvasCtx.save();
-      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-      canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
-
-      if (results.multiFaceLandmarks && connect) {
-        for (const landmarks of results.multiFaceLandmarks) {
-          if (!manual_mode && showDebug) {
-             // Debug overlay: Render developer landmark dots (8)
-             const debugLandmarks = [33, 263, 168, 234, 454];
-             canvasCtx.fillStyle = '#ff3366';
-             for (let i of debugLandmarks) {
-                 const lm = landmarks[i];
-                 canvasCtx.beginPath();
-                 canvasCtx.arc(lm.x * canvasElement.width, lm.y * canvasElement.height, 4, 0, 2 * Math.PI);
-                 canvasCtx.fill();
-                 
-                 // Text label
-                 canvasCtx.fillStyle = '#ffffff';
-                 canvasCtx.font = '10px Arial';
-                 canvasCtx.fillText(`L${i}`, lm.x * canvasElement.width + 5, lm.y * canvasElement.height - 5);
-                 canvasCtx.fillStyle = '#ff3366';
-             }
+      const canvasCtx = canvasRef.current.getContext("2d");
+      
+      canvasCtx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+      // We don't draw the raw image here since react-webcam already renders it nicely with CSS mirroring.
+      
+      if (results.faceLandmarks && showDebug) {
+        for (const landmarks of results.faceLandmarks) {
+          const debugLandmarks = [33, 263, 168, 234, 454];
+          canvasCtx.fillStyle = '#ff3366';
+          for (let i of debugLandmarks) {
+            const lm = landmarks[i];
+            // Mirror X on canvas to align with mirrored webcam
+            const mirroredX = 1.0 - lm.x;
+            canvasCtx.beginPath();
+            canvasCtx.arc(mirroredX * canvasRef.current.width, lm.y * canvasRef.current.height, 4, 0, 2 * Math.PI);
+            canvasCtx.fill();
+            
+            canvasCtx.fillStyle = '#ffffff';
+            canvasCtx.font = '10px Arial';
+            canvasCtx.fillText(`L${i}`, mirroredX * canvasRef.current.width + 5, lm.y * canvasRef.current.height - 5);
+            canvasCtx.fillStyle = '#ff3366';
           }
-
-          // Face mesh wireframe for context
-          connect(canvasCtx, landmarks, Facemesh.FACEMESH_RIGHT_EYE, {color: 'rgba(0, 255, 136, 0.3)', lineWidth: 1});
-          connect(canvasCtx, landmarks, Facemesh.FACEMESH_LEFT_EYE, {color: 'rgba(0, 255, 136, 0.3)', lineWidth: 1});
-          connect(canvasCtx, landmarks, Facemesh.FACEMESH_FACE_OVAL, {color: 'rgba(255,255,255,0.1)', lineWidth: 1});
         }
       }
-      canvasCtx.restore();
     }
   }
 
-  useEffect(() => {
-    const faceMesh = new FaceMesh({
-      locateFile: (file) => {
-        return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
+  const renderLoop = () => {
+    if (
+      webcamRef.current &&
+      webcamRef.current.video &&
+      webcamRef.current.video.readyState >= 2 &&
+      faceLandmarkerRef.current
+    ) {
+      const video = webcamRef.current.video;
+      // Ensure we process new frames only
+      if (video.currentTime !== video.lastProcessedTime) {
+        video.lastProcessedTime = video.currentTime;
+        const startTimeMs = performance.now();
+        const results = faceLandmarkerRef.current.detectForVideo(video, startTimeMs);
+        onResults(results);
       }
-    });
-
-    faceMesh.setOptions({
-      maxNumFaces: 1,
-      refineLandmarks: true,
-      minDetectionConfidence: 0.5,
-      minTrackingConfidence: 0.5,
-      selfieMode: true,
-    });
-
-    faceMesh.onResults(onResults);
-
-    let cameraInstance = null;
-
-    if (webcamRef.current && webcamRef.current.video) {
-      cameraInstance = new cam.Camera(webcamRef.current.video, {
-        onFrame: async () => {
-          if (webcamRef.current && webcamRef.current.video) {
-            await faceMesh.send({ image: webcamRef.current.video });
-          }
-        },
-      });
-      cameraInstance.start().catch((err) => {
-        console.error("Camera startup failed: ", err);
-        setCameraMocked(true);
-        setMockReason(err.message || 'Device camera access denied');
-        setIsManual(true);
-      });
     }
+    requestRef.current = requestAnimationFrame(renderLoop);
+  };
+
+  useEffect(() => {
+    let active = true;
+
+    const setupMediaPipe = async () => {
+      try {
+        const filesetResolver = await FilesetResolver.forVisionTasks(
+          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+        );
+        if (!active) return;
+
+        const faceLandmarker = await FaceLandmarker.createFromOptions(filesetResolver, {
+          baseOptions: {
+            modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+            delegate: "GPU"
+          },
+          outputFaceBlendshapes: true,
+          outputFacialTransformationMatrixes: true,
+          runningMode: "VIDEO",
+          numFaces: 1
+        });
+        
+        faceLandmarkerRef.current = faceLandmarker;
+        requestRef.current = requestAnimationFrame(renderLoop);
+      } catch (err) {
+        console.error("MediaPipe initialization failed: ", err);
+        setCameraMocked(true);
+        setMockReason(err.message || 'FaceLandmarker failed to load');
+        setIsManual(true);
+      }
+    };
+
+    setupMediaPipe();
 
     return () => {
-      if (cameraInstance) {
-        try {
-          cameraInstance.stop();
-        } catch (e) {
-          // ignore cleanup errors
-        }
+      active = false;
+      if (faceLandmarkerRef.current) {
+        faceLandmarkerRef.current.close();
+      }
+      if (requestRef.current) {
+        cancelAnimationFrame(requestRef.current);
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
