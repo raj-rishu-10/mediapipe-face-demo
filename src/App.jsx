@@ -1,6 +1,6 @@
 import './App.css';
 import Webcam from "react-webcam";
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState, useMemo } from 'react';
 import { FaceLandmarker, FilesetResolver } from "@mediapipe/tasks-vision";
 import { ThemeProvider, createTheme } from "@mui/material/styles";
 import {
@@ -19,8 +19,7 @@ import {
   Tooltip
 } from '@mui/material';
 import Header from './Header';
-import { Canvas, useFrame } from "@react-three/fiber";
-import { useLoader } from "@react-three/fiber";
+import { Canvas, useFrame, useLoader } from "@react-three/fiber";
 import { Suspense } from "react";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
 import { OrbitControls } from "@react-three/drei";
@@ -93,20 +92,45 @@ function Model({ url, ...props }) {
   const gltf = useLoader(GLTFLoader, url);
   const faceAnchorRef = useRef();
   
-  // Automatically calculate model dimensions and fix alignment
+  // ROOT CAUSE FIX: Clone the scene on every mount.
+  // useLoader caches the GLTFLoader result, meaning gltf.scene is the SAME object
+  // reference across model switches. Without cloning:
+  //   1. We mutate the cached scene's position in-place (useEffect below),
+  //      so on the next mount it starts with corrupted transforms.
+  //   2. Three.js removes the original scene from the render graph on unmount,
+  //      making subsequent mounts of the same cached object invisible.
+  // Cloning gives each mount its own independent Three.js Object3D tree.
+  const clonedScene = useMemo(() => gltf.scene.clone(true), [gltf.scene]);
+
+  // Automatically calculate model dimensions and fix alignment on the CLONE
   useEffect(() => {
-    if (gltf.scene) {
-      const box = new THREE.Box3().setFromObject(gltf.scene);
+    if (clonedScene) {
+      const box = new THREE.Box3().setFromObject(clonedScene);
       const center = box.getCenter(new THREE.Vector3());
       
       // Fix GLB alignment: glasses origin must be centered on the nose bridge
-      gltf.scene.position.x = -center.x;
-      gltf.scene.position.y = -center.y;
+      clonedScene.position.x = -center.x;
+      clonedScene.position.y = -center.y;
       
       // Z-axis alignment to sit naturally over both eyes (back of lenses)
-      gltf.scene.position.z = -box.max.z + ((box.max.z - box.min.z) * 0.1); 
+      clonedScene.position.z = -box.max.z + ((box.max.z - box.min.z) * 0.1); 
     }
-  }, [gltf.scene]);
+
+    // Dispose the cloned scene's geometries and materials on unmount
+    // to prevent GPU memory leaks when switching models rapidly.
+    return () => {
+      clonedScene.traverse((child) => {
+        if (child.isMesh) {
+          child.geometry?.dispose();
+          if (Array.isArray(child.material)) {
+            child.material.forEach((m) => m.dispose());
+          } else {
+            child.material?.dispose();
+          }
+        }
+      });
+    };
+  }, [clonedScene]);
 
   useFrame((state, delta) => {
     if (!faceAnchorRef.current) return;
@@ -160,9 +184,9 @@ function Model({ url, ...props }) {
 
   return (
     <group ref={faceAnchorRef} {...props}>
-      {/* FaceAnchor logic: GLB model attached as child to follow head movements smoothly */}
+      {/* FaceAnchor: GLB model clone attached as child to follow head movements */}
       <FaceOccluder position={[0, -0.5, -1.5]} scale={2.5} rotationQuat={new THREE.Quaternion()} />
-      <primitive object={gltf.scene} />
+      <primitive object={clonedScene} />
     </group>
   );
 }
