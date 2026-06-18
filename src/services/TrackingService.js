@@ -80,16 +80,21 @@ export function processTrackingResults(results, manualOffsets = {}, cameraOption
   const viewportHeight = 2 * D * halfTanFOVY;
   const viewportWidth  = viewportHeight * cameraOptions.aspect;
 
-  // ── 3. Eye center anchor ─────────────────────────────────────────────────
+  // ── 3. Head center (rotation pivot) anchor ────────────────────────────────
   const eyeCenter = computeEyeCenter(landmarks);
   const eyeWorldX = (eyeCenter.x - 0.5) * viewportWidth;
   const eyeWorldY = -(eyeCenter.y - 0.5) * viewportHeight;
 
-  // Combine stable eyeCenter X/Y + matrix depth Z
+  const eyePos = new THREE.Vector3(eyeWorldX, eyeWorldY, worldPos.z);
+
+  // Offset eyeCenter along head local back vector by 8.4cm (0.084m) to position pivot at head center
+  const localBack = new THREE.Vector3(0, 0, 1).applyQuaternion(finalQuat);
+  const headPivot = eyePos.clone().addScaledVector(localBack, 0.084);
+
   const finalPos = new THREE.Vector3(
-    eyeWorldX + (manualOffsets.x || 0),
-    eyeWorldY + (manualOffsets.y || 0),
-    worldPos.z + (manualOffsets.z || 0)
+    headPivot.x + (manualOffsets.x || 0),
+    headPivot.y + (manualOffsets.y || 0),
+    headPivot.z + (manualOffsets.z || 0)
   );
 
   // ── 4. Physical scale calculation (in meters) ────────────────────────────

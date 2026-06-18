@@ -157,6 +157,7 @@ export default function App() {
   const [posZ,  setPosZ]  = useState(-0.6);
   const [scale, setScale] = useState(0.14);
   const [rotY,  setRotY]  = useState(0);
+  const [videoAspect, setVideoAspect] = useState(4 / 3);
 
   // Listen for camera-fallback polyfill event from index.jsx
   useEffect(() => {
@@ -313,13 +314,14 @@ export default function App() {
           <Grid item xs={12} md={7} lg={7} sx={{ display: 'flex', flexDirection: 'column' }}>
             <Box
               className="outer-div"
-              sx={{ position: 'relative', width: '100%', paddingTop: '56.25%', flexGrow: 1 }}
+              sx={{ position: 'relative', width: '100%', aspectRatio: videoAspect, height: 'auto', maxHeight: '70vh', flexGrow: 1 }}
             >
               {/* Webcam layer + MediaPipe tracking */}
               <WebcamTracker
                 webcamRef={webcamRef}
                 manualOffsets={manualOffsets}
                 enabled={!isManual}
+                onVideoDimensions={setVideoAspect}
               />
 
               {/* Three.js overlay */}

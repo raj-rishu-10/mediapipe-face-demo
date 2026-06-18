@@ -53,7 +53,7 @@ export function GlassesModel({ url }) {
   // Wrap in a group to apply a slight downward and forward offset in FaceAnchor units
   // so the glasses rest naturally on the nose bridge slightly below the eye center.
   return (
-    <group position={[0, -0.05, 0.15]}>
+    <group position={[0, -0.05, 0.75]}>
       <primitive object={clonedScene} />
     </group>
   );

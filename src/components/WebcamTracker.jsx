@@ -22,7 +22,7 @@ import { useFaceLandmarker } from '../hooks/useFaceLandmarker';
  *
  * zIndex:1 puts the video below the Three.js Canvas (zIndex:2).
  */
-export function WebcamTracker({ webcamRef, manualOffsets, enabled }) {
+export function WebcamTracker({ webcamRef, manualOffsets, enabled, onVideoDimensions }) {
   useFaceLandmarker(webcamRef, manualOffsets, enabled);
 
   return (
@@ -33,6 +33,12 @@ export function WebcamTracker({ webcamRef, manualOffsets, enabled }) {
       screenshotFormat="image/jpeg"
       playsInline={true}
       videoConstraints={{ facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }}
+      onLoadedMetadata={(e) => {
+        const video = e.target;
+        if (video.videoWidth && video.videoHeight) {
+          onVideoDimensions?.(video.videoWidth / video.videoHeight);
+        }
+      }}
       style={{
         position:  'absolute',
         top:       0,
