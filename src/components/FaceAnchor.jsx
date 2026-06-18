@@ -31,9 +31,13 @@ export function FaceAnchor({
     if (!obj) return;
 
     if (isManual) {
-      // Manual mode: direct slider control in metric units
-      obj.position.set(manualX, manualY, manualZ);
+      // Manual mode: direct slider control in metric units, compensated for glasses local offsets
       obj.scale.setScalar(manualScale);
+      obj.position.set(
+        manualX,
+        manualY - (-0.05) * manualScale, // compensate glasses Y offset
+        manualZ - 0.75 * manualScale     // compensate glasses Z offset
+      );
       obj.rotation.set(0, manualRotY, 0);
       return;
     }

@@ -88,7 +88,7 @@ export function processTrackingResults(results, manualOffsets = {}, cameraOption
   const eyePos = new THREE.Vector3(eyeWorldX, eyeWorldY, worldPos.z);
 
   // Offset eyeCenter along head local back vector by 8.4cm (0.084m) to position pivot at head center
-  const localBack = new THREE.Vector3(0, 0, -1).applyQuaternion(finalQuat);
+  const localBack = new THREE.Vector3(0, 0, 1).applyQuaternion(finalQuat);
   const headPivot = eyePos.clone().addScaledVector(localBack, 0.084);
 
   const finalPos = new THREE.Vector3(
