@@ -10,7 +10,7 @@ import * as THREE from 'three';
  *   W      = s * scaleW                   ← viewport-scaled half-width
  *   DFront = 1 / (2 * W * halfTanFOVX)   ← depth from W and camera FOV
  *   D      = DFront + 0.5                 ← total depth
- *
+ *   
  * This means s encodes BOTH scale AND depth simultaneously.
  *
  * ── MEDIAPIPE MAPPING ────────────────────────────────────────────────────────
@@ -19,16 +19,6 @@ import * as THREE from 'three';
  *   - Depth  → Z translation in facialTransformationMatrixes
  *
  * We use the temple distance to compute a proportional scale for the glasses.
- * The reference distance is calibrated so that at typical working distance
- * (≈60cm), the glasses naturally span the width of the face.
- *
- * Calibration:
- *   At 60cm, average normalized temple distance ≈ 0.38
- *   Jeeliz at 60cm: s ≈ 0.35, D ≈ 4.6
- *   At this D Jeeliz renders a unit cube at world-scale ≈ 1.0
- *   Our base scale = 18 produces a physically similar glasses size
- *
- * Therefore:  worldScale = (templeDistance / BASE_TEMPLE_DIST) * BASE_SCALE
  */
 
 // ── Landmark index constants ───────────────────────────────────────────────────
@@ -52,7 +42,6 @@ const BASE_SCALE       = 18;   // Three.js world-scale at BASE_TEMPLE_DIST
 
 /**
  * Compute the glasses world-scale from landmark temple distance.
- * Equivalent to Jeeliz's `s` → `D` → scale pipeline.
  */
 export function computeFaceScale(landmarks) {
   const lt = landmarks[LM.LEFT_TEMPLE];
@@ -67,26 +56,19 @@ export function computeFaceScale(landmarks) {
 
 /**
  * Compute eye center in normalized [0..1] coordinates.
- * Jeeliz's x,y is the face detection-window center, which corresponds to
- * the inter-eye midpoint on the canonical face model.
- *
- * For selfie (front) camera: X must be mirrored (1 - x).
+ * We do NOT mirror X here (no 1.0 - x) because the R3F canvas is CSS-mirrored.
  */
 export function computeEyeCenter(landmarks) {
   const le = landmarks[LM.LEFT_EYE_OUTER];
   const re = landmarks[LM.RIGHT_EYE_OUTER];
   return {
-    x: 1.0 - (le.x + re.x) / 2,   // mirror for selfie mode
+    x: (le.x + re.x) / 2,   // Keep unmirrored
     y: (le.y + re.y) / 2,
   };
 }
 
 /**
  * Map a normalized eye center to Three.js world-space X/Y.
- * This matches Jeeliz's:
- *   x = xv * D * halfTanFOVX
- *   y = yv * D * halfTanFOVX / aspectRatio
- * with a simplified linear approximation (D is provided by HeadPose Z).
  */
 export function eyeCenterToWorld(nx, ny) {
   return new THREE.Vector3(
@@ -106,7 +88,7 @@ export function computePD(landmarks) {
   const li = landmarks[LM.LEFT_IRIS];
   const ri = landmarks[LM.RIGHT_IRIS];
   if (!li || !ri) return 62;
-  return landmarkDistance(li, ri) * 100;
+  return landmarkDistance(li, ri) * 1000; // Multiply by 1000 to get value in mm range
 }
 
 /** Face shape classifier */

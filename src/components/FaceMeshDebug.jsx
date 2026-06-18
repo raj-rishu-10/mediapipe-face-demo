@@ -1,26 +1,27 @@
 import { useRef } from 'react';
-import { useFrame, useThree } from '@react-three/fiber';
-import * as THREE from 'three';
+import { useFrame } from '@react-three/fiber';
 import useTrackingStore from '../store/useTrackingStore';
 import { LM } from '../utils/LandmarkUtils';
 
+// Debug these specific 5 landmarks requested by the user
 const LM_DEBUG = [
-  LM.LEFT_EYE_OUTER, LM.RIGHT_EYE_OUTER,
-  LM.LEFT_TEMPLE, LM.RIGHT_TEMPLE,
-  LM.NOSE_BRIDGE, LM.CHIN, LM.FOREHEAD,
+  LM.LEFT_EYE_OUTER,  // 33
+  LM.RIGHT_EYE_OUTER, // 263
+  LM.LEFT_TEMPLE,     // 234
+  LM.RIGHT_TEMPLE,    // 454
+  LM.NOSE_BRIDGE,     // 168
 ];
 
 /**
  * FaceMeshDebug
  *
  * Renders colored 3D spheres at key face landmarks so you can visually verify
- * that the coordinate mapping is correct before tweaking offsets.
+ * that the coordinate mapping is correct.
  *
  * Only rendered when showDebug is true.
  */
 export function FaceMeshDebug({ showDebug }) {
   const dotRefs = useRef({});
-  const { size } = useThree();
 
   useFrame(() => {
     if (!showDebug) return;
@@ -34,10 +35,10 @@ export function FaceMeshDebug({ showDebug }) {
       const lm = landmarks[idx];
       if (!lm) return;
 
-      // Mirror X for selfie mode and map to world space
-      const wx = (1.0 - lm.x - 0.5) * 10;
+      // Unmirrored X mapping because the R3F Canvas is already CSS-mirrored
+      const wx = (lm.x - 0.5) * 10;
       const wy = -(lm.y - 0.5) * 7.5;
-      const wz = -3 + lm.z * 5;
+      const wz = -3 + (lm.z || 0) * 5;
       ref.position.set(wx, wy, wz);
     });
   });
@@ -45,13 +46,11 @@ export function FaceMeshDebug({ showDebug }) {
   if (!showDebug) return null;
 
   const colors = {
-    [LM.LEFT_EYE_OUTER]:  '#00ff88',
-    [LM.RIGHT_EYE_OUTER]: '#00ff88',
-    [LM.LEFT_TEMPLE]:     '#ff5500',
-    [LM.RIGHT_TEMPLE]:    '#ff5500',
-    [LM.NOSE_BRIDGE]:     '#ffffff',
-    [LM.CHIN]:            '#8888ff',
-    [LM.FOREHEAD]:        '#8888ff',
+    [LM.LEFT_EYE_OUTER]:  '#ff0055', // Red
+    [LM.RIGHT_EYE_OUTER]: '#00ff88', // Green
+    [LM.LEFT_TEMPLE]:     '#ffaa00', // Orange
+    [LM.RIGHT_TEMPLE]:    '#00aaff', // Blue
+    [LM.NOSE_BRIDGE]:     '#ffffff', // White
   };
 
   return (
@@ -61,8 +60,8 @@ export function FaceMeshDebug({ showDebug }) {
           key={idx}
           ref={(r) => { if (r) dotRefs.current[idx] = r; }}
         >
-          <sphereGeometry args={[0.04, 8, 8]} />
-          <meshBasicMaterial color={colors[idx] || '#ffffff'} />
+          <sphereGeometry args={[0.08, 16, 16]} />
+          <meshBasicMaterial color={colors[idx] || '#ffffff'} depthTest={false} transparent opacity={0.9} />
         </mesh>
       ))}
     </group>

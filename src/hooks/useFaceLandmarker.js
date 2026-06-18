@@ -20,7 +20,9 @@ export function useFaceLandmarker(videoRef, manualOffsets, enabled) {
 
     const setup = async () => {
       try {
+        console.log('[useFaceLandmarker] Initializing MediaPipe...');
         landmarkerRef.current = await initMediaPipe();
+        console.log('[useFaceLandmarker] MediaPipe initialized successfully:', landmarkerRef.current);
         if (!alive) return;
         startLoop();
       } catch (err) {
@@ -30,19 +32,45 @@ export function useFaceLandmarker(videoRef, manualOffsets, enabled) {
     };
 
     const startLoop = () => {
+      console.log('[useFaceLandmarker] Starting tracking loop, enabled:', enabled);
       const loop = () => {
         if (!alive) return;
         rafRef.current = requestAnimationFrame(loop);
 
         const video = videoRef.current?.video ?? videoRef.current;
-        if (!enabled || !video || video.readyState < 2 || !landmarkerRef.current) return;
+        
+        if (!enabled) {
+          // Quiet return when disabled (manual mode)
+          return;
+        }
+
+        if (!video) {
+          console.warn('[useFaceLandmarker] Video element is null/undefined');
+          return;
+        }
+
+        if (video.readyState < 2) {
+          console.warn('[useFaceLandmarker] Video not ready yet. readyState:', video.readyState);
+          return;
+        }
+
+        if (!landmarkerRef.current) {
+          console.warn('[useFaceLandmarker] FaceLandmarker is not loaded');
+          return;
+        }
 
         // Avoid re-processing the same video frame
-        if (video.currentTime === video._lastProcessed) return;
+        if (video.currentTime === video._lastProcessed) {
+          return;
+        }
         video._lastProcessed = video.currentTime;
 
-        const results = landmarkerRef.current.detectForVideo(video, performance.now());
-        processTrackingResults(results, manualOffsets);
+        try {
+          const results = landmarkerRef.current.detectForVideo(video, performance.now());
+          processTrackingResults(results, manualOffsets);
+        } catch (err) {
+          console.error('[useFaceLandmarker] detectForVideo error:', err);
+        }
       };
       loop();
     };
