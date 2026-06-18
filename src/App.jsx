@@ -28,13 +28,88 @@ const darkTheme = createTheme({
   },
 });
 
-// ─── Model list ───────────────────────────────────────────────────────────────
+// ─── Model list — all 8 GLB frames in public/ ────────────────────────────────
 const MODELS_LIST = [
-  { id: 'bolle',    name: 'Bolle Nevada Blue',    path: '/translated-bolle.glb',    desc: 'Stylish blue snow goggles' },
-  { id: 'anaconda', name: 'Anaconda Black',        path: '/anaconda_black.glb',      desc: 'Classic black sports sunglasses' },
-  { id: 'bolt',     name: 'Bolt 2.0 Tortoise',    path: '/bolt_2.0_turtoise.glb',   desc: 'Tortoise pattern casual frame' },
-  { id: 'glass',    name: 'Premium Glass',         path: '/models/glass.glb',        desc: 'Frameless glass design' },
-  { id: 'prize',    name: 'Prize Black',           path: '/models/prize_Black.glb',  desc: 'Modern sport shield glasses' },
+  {
+    id: 'bolle',
+    name: 'Nevada Blue',
+    brand: 'Bollé',
+    path: '/translated-bolle.glb',
+    desc: 'Wide-lens snow goggle with blue shield. Great for broad faces.',
+    emoji: '🥽',
+    tag: 'Goggle',
+    color: '#4fa3e0',
+  },
+  {
+    id: 'anaconda',
+    name: 'Anaconda',
+    brand: 'Sport',
+    path: '/anaconda_black.glb',
+    desc: 'Classic wrap-around black sports sunglasses.',
+    emoji: '🕶️',
+    tag: 'Sport',
+    color: '#444',
+  },
+  {
+    id: 'anaconda-cyris',
+    name: 'Anaconda Cyris',
+    brand: 'Sport',
+    path: '/models/anaconda_cyris.glb',
+    desc: 'Sleek Cyris variant with tinted lenses.',
+    emoji: '😎',
+    tag: 'Sport',
+    color: '#556b2f',
+  },
+  {
+    id: 'bolt-tortoise',
+    name: 'Bolt Tortoise',
+    brand: 'Casual',
+    path: '/bolt_2.0_turtoise.glb',
+    desc: 'Warm tortoise-shell pattern casual frame.',
+    emoji: '🐢',
+    tag: 'Casual',
+    color: '#8B6914',
+  },
+  {
+    id: 'bolt-black',
+    name: 'Bolt Black',
+    brand: 'Casual',
+    path: '/models/bolt_2.0_black.glb',
+    desc: 'Sleek matte-black version of the Bolt 2.0.',
+    emoji: '⚡',
+    tag: 'Casual',
+    color: '#222',
+  },
+  {
+    id: 'glass',
+    name: 'Premium Glass',
+    brand: 'Luxury',
+    path: '/models/glass.glb',
+    desc: 'Minimalist frameless glass design.',
+    emoji: '✨',
+    tag: 'Luxury',
+    color: '#a0c4ff',
+  },
+  {
+    id: 'prize',
+    name: 'Prize Black',
+    brand: 'Shield',
+    path: '/models/prize_Black.glb',
+    desc: 'Modern sport shield with full wraparound protection.',
+    emoji: '🏆',
+    tag: 'Shield',
+    color: '#1a1a1a',
+  },
+  {
+    id: 'bolle-mesh',
+    name: 'Nevada Mesh',
+    brand: 'Bollé',
+    path: '/with-mesh-bolle.glb',
+    desc: 'Bollé Nevada with visible head mesh for alignment debug.',
+    emoji: '🔵',
+    tag: 'Debug',
+    color: '#3a7bd5',
+  },
 ];
 
 // ─── App ──────────────────────────────────────────────────────────────────────
@@ -258,24 +333,89 @@ export default function App() {
                   </Alert>
                 )}
 
-                {/* Model Selector */}
-                <Typography variant="subtitle2" sx={{ mb: 1, color: '#888bc4', fontWeight: '600' }}>
+                {/* ── Model Selector ─────────────────────────────────── */}
+                <Typography variant="subtitle2" sx={{ mb: 1.5, color: '#888bc4', fontWeight: '600', letterSpacing: '0.08em' }}>
                   SELECT GLASSES STYLE
                 </Typography>
-                <Grid container spacing={1.5} sx={{ mb: 3 }}>
+                <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1.2, mb: 3 }}>
                   {MODELS_LIST.map((model) => (
-                    <Grid item xs={6} key={model.id}>
-                      <Tooltip title={model.desc} placement="top">
-                        <Box
-                          className={`model-card ${selectedModel.id === model.id ? 'active' : ''}`}
-                          onClick={() => setSelectedModel(model)}
-                        >
-                          <Typography variant="body2" fontWeight="600">{model.name}</Typography>
+                    <Tooltip key={model.id} title={model.desc} placement="top" arrow>
+                      <Box
+                        onClick={() => setSelectedModel(model)}
+                        sx={{
+                          cursor: 'pointer',
+                          borderRadius: '10px',
+                          border: selectedModel.id === model.id
+                            ? '1.5px solid #00ff88'
+                            : '1px solid rgba(255,255,255,0.07)',
+                          background: selectedModel.id === model.id
+                            ? 'rgba(0,255,136,0.07)'
+                            : 'rgba(255,255,255,0.02)',
+                          boxShadow: selectedModel.id === model.id
+                            ? '0 0 12px rgba(0,255,136,0.18)'
+                            : 'none',
+                          p: '9px 10px 8px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 1,
+                          transition: 'all 0.18s ease',
+                          '&:hover': {
+                            borderColor: 'rgba(0,255,136,0.4)',
+                            background: 'rgba(0,255,136,0.04)',
+                            transform: 'translateY(-1px)',
+                          },
+                        }}
+                      >
+                        {/* Emoji icon circle */}
+                        <Box sx={{
+                          width: 36, height: 36, borderRadius: '8px', flexShrink: 0,
+                          background: `${model.color}22`,
+                          border: `1px solid ${model.color}44`,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: '1.1rem',
+                        }}>
+                          {model.emoji}
                         </Box>
-                      </Tooltip>
-                    </Grid>
+
+                        <Box sx={{ minWidth: 0 }}>
+                          <Typography
+                            variant="caption"
+                            sx={{
+                              display: 'block',
+                              color: selectedModel.id === model.id ? '#00ff88' : '#e0e0e0',
+                              fontWeight: 700,
+                              fontSize: '0.72rem',
+                              lineHeight: 1.2,
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                            }}
+                          >
+                            {model.name}
+                          </Typography>
+                          <Typography
+                            variant="caption"
+                            sx={{
+                              display: 'block',
+                              color: '#666',
+                              fontSize: '0.62rem',
+                              lineHeight: 1.2,
+                            }}
+                          >
+                            {model.brand} · {model.tag}
+                          </Typography>
+                        </Box>
+
+                        {/* Active checkmark */}
+                        {selectedModel.id === model.id && (
+                          <Box sx={{ ml: 'auto', color: '#00ff88', fontSize: '0.75rem', flexShrink: 0 }}>
+                            ✓
+                          </Box>
+                        )}
+                      </Box>
+                    </Tooltip>
                   ))}
-                </Grid>
+                </Box>
 
                 <Divider sx={{ my: 2, borderColor: 'rgba(255,255,255,0.08)' }} />
 
