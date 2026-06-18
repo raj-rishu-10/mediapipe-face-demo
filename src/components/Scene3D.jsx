@@ -24,6 +24,7 @@ function Lights() {
 export function Scene3D({
   modelUrl,
   modelKey,
+  scaleMultiplier,
   showDebug,
   isManual,
   manualX,
@@ -72,7 +73,7 @@ export function Scene3D({
         {/* Glasses model — child of FaceAnchor, never attached to a single landmark */}
         {modelUrl && (
           <Suspense fallback={null}>
-            <GlassesModel key={modelKey} url={modelUrl} />
+            <GlassesModel key={modelKey} url={modelUrl} scaleMultiplier={scaleMultiplier} />
           </Suspense>
         )}
       </FaceAnchor>

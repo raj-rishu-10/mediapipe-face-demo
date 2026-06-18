@@ -49,6 +49,7 @@ const MODELS_LIST = [
     tag: 'Goggle',
     color: '#4fa3e0',
     price: 189,
+    scaleMultiplier: 1.18,
   },
   {
     id: 'anaconda',
@@ -60,6 +61,7 @@ const MODELS_LIST = [
     tag: 'Sport',
     color: '#444',
     price: 129,
+    scaleMultiplier: 1.03,
   },
   {
     id: 'anaconda-cyris',
@@ -71,6 +73,7 @@ const MODELS_LIST = [
     tag: 'Sport',
     color: '#556b2f',
     price: 149,
+    scaleMultiplier: 1.03,
   },
   {
     id: 'bolt-tortoise',
@@ -82,6 +85,7 @@ const MODELS_LIST = [
     tag: 'Casual',
     color: '#8B6914',
     price: 159,
+    scaleMultiplier: 0.97,
   },
   {
     id: 'bolt-black',
@@ -93,6 +97,7 @@ const MODELS_LIST = [
     tag: 'Casual',
     color: '#222',
     price: 169,
+    scaleMultiplier: 0.97,
   },
   {
     id: 'glass',
@@ -104,6 +109,7 @@ const MODELS_LIST = [
     tag: 'Luxury',
     color: '#a0c4ff',
     price: 249,
+    scaleMultiplier: 0.90,
   },
   {
     id: 'prize',
@@ -115,6 +121,7 @@ const MODELS_LIST = [
     tag: 'Shield',
     color: '#1a1a1a',
     price: 199,
+    scaleMultiplier: 1.08,
   },
   {
     id: 'bolle-mesh',
@@ -126,6 +133,7 @@ const MODELS_LIST = [
     tag: 'Debug',
     color: '#3a7bd5',
     price: 99,
+    scaleMultiplier: 1.18,
   },
 ];
 
@@ -328,6 +336,7 @@ export default function App() {
               <Scene3D
                 modelUrl={selectedModel?.path}
                 modelKey={selectedModel?.id}
+                scaleMultiplier={selectedModel?.scaleMultiplier}
                 showDebug={showDebug}
                 isManual={isManual}
                 manualX={posX}

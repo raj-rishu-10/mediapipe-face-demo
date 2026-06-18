@@ -24,7 +24,7 @@ const _gltfCache = {};
  * Loads GLB models asynchronously using standard useEffect to prevent R3F Suspense flashing/blocking.
  * Caches scenes globally to ensure instantaneous, seamless switching.
  */
-export function GlassesModel({ url }) {
+export function GlassesModel({ url, scaleMultiplier }) {
   const [gltf, setGltf] = useState(null);
 
   useEffect(() => {
@@ -63,14 +63,14 @@ export function GlassesModel({ url }) {
     clone.position.y = -center.y;
     clone.position.z = -box.max.z + (box.max.z - box.min.z) * 0.1;
 
-    // Normalize scale: make the width of the glasses exactly 1.0 unit in local space
+    // Normalize scale: make the width of the glasses exactly 1.0 unit in local space, factored by scaleMultiplier
     const width = box.max.x - box.min.x;
     if (width > 0) {
-      clone.scale.setScalar(1.0 / width);
+      clone.scale.setScalar((1.0 / width) * (scaleMultiplier || 1.0));
     }
 
     return clone;
-  }, [gltf]);
+  }, [gltf, scaleMultiplier]);
 
   if (!clonedScene) return null;
 
