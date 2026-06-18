@@ -16,6 +16,12 @@ jest.mock('@react-three/drei', () => ({
   OrbitControls: () => <div />,
 }));
 
+jest.mock('./components/GlassesModel', () => ({
+  GlassesModel: () => <group data-testid="mock-glasses" />,
+  preloadAllGlasses: jest.fn(),
+  ALL_MODEL_PATHS: [],
+}));
+
 // Mock react-webcam
 jest.mock('react-webcam', () => {
   const React = require('react');

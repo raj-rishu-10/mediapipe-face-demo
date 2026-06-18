@@ -1,5 +1,4 @@
-import { useMemo } from 'react';
-import { useLoader } from '@react-three/fiber';
+import { useMemo, useState, useEffect } from 'react';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
 import * as THREE from 'three';
 
@@ -15,16 +14,41 @@ export const ALL_MODEL_PATHS = [
   '/with-mesh-bolle.glb',
 ];
 
+// Global cache for loaded GLTF models to avoid redundant network requests and enable instant switching
+const _gltfCache = {};
+
 /**
  * GlassesModel
  *
  * Renders the GLB glasses model as a child of FaceAnchor.
- * Clones the cached GLTF scene to avoid sharing mutable state.
- * Positions and centers the model synchronously inside useMemo to prevent
- * any single-frame flashing or offsets on initial load.
+ * Loads GLB models asynchronously using standard useEffect to prevent R3F Suspense flashing/blocking.
+ * Caches scenes globally to ensure instantaneous, seamless switching.
  */
 export function GlassesModel({ url }) {
-  const gltf = useLoader(GLTFLoader, url);
+  const [gltf, setGltf] = useState(null);
+
+  useEffect(() => {
+    if (!url) return;
+
+    // Use cached model if available
+    if (_gltfCache[url]) {
+      setGltf(_gltfCache[url]);
+      return;
+    }
+
+    const loader = new GLTFLoader();
+    loader.load(
+      url,
+      (loadedGltf) => {
+        _gltfCache[url] = loadedGltf;
+        setGltf(loadedGltf);
+      },
+      undefined,
+      (error) => {
+        console.error('[GlassesModel] Failed to load GLTF model:', url, error);
+      }
+    );
+  }, [url]);
 
   // Clone and center synchronously to avoid any 1-frame flash of uncentered model
   const clonedScene = useMemo(() => {
@@ -46,7 +70,7 @@ export function GlassesModel({ url }) {
     }
 
     return clone;
-  }, [gltf.scene]);
+  }, [gltf]);
 
   if (!clonedScene) return null;
 
@@ -59,13 +83,20 @@ export function GlassesModel({ url }) {
   );
 }
 
-// Preload helper to cache all models on startup
+// Preload helper to populate the cache on startup
 export function preloadAllGlasses() {
+  const loader = new GLTFLoader();
   ALL_MODEL_PATHS.forEach((path) => {
-    try {
-      useLoader.preload(GLTFLoader, path);
-    } catch (e) {
-      console.warn('Preload failed for model:', path, e);
-    }
+    if (_gltfCache[path]) return;
+    loader.load(
+      path,
+      (loadedGltf) => {
+        _gltfCache[path] = loadedGltf;
+      },
+      undefined,
+      (e) => {
+        console.warn('[GlassesModel] Preload failed for model:', path, e);
+      }
+    );
   });
 }
