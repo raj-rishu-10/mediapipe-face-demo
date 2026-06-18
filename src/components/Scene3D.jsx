@@ -70,9 +70,11 @@ export function Scene3D({
         <FaceOccluder />
 
         {/* Glasses model — child of FaceAnchor, never attached to a single landmark */}
-        <Suspense fallback={null}>
-          <GlassesModel key={modelKey} url={modelUrl} />
-        </Suspense>
+        {modelUrl && (
+          <Suspense fallback={null}>
+            <GlassesModel key={modelKey} url={modelUrl} />
+          </Suspense>
+        )}
       </FaceAnchor>
 
       {/* Debug landmark visualization (developer tool) */}

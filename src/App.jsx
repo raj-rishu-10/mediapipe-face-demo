@@ -1,5 +1,5 @@
 import './App.css';
-import { useRef, useState, useEffect, useCallback } from 'react';
+import { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import {
   Grid, Card, CardContent, Typography, Slider, Switch,
@@ -15,6 +15,15 @@ import CameraAltIcon          from '@mui/icons-material/CameraAlt';
 import FaceRetouchingNaturalIcon from '@mui/icons-material/FaceRetouchingNatural';
 import FileUploadIcon         from '@mui/icons-material/FileUpload';
 
+// Jeeliz-style icons
+import FavoriteIcon           from '@mui/icons-material/Favorite';
+import FavoriteBorderIcon     from '@mui/icons-material/FavoriteBorder';
+import CloseIcon              from '@mui/icons-material/Close';
+import SearchIcon             from '@mui/icons-material/Search';
+import OpenWithIcon           from '@mui/icons-material/OpenWith';
+import LocalOfferIcon         from '@mui/icons-material/LocalOffer';
+import ShareIcon              from '@mui/icons-material/Share';
+
 import useTrackingStore from './store/useTrackingStore';
 import { Scene3D }       from './components/Scene3D';
 import { WebcamTracker } from './components/WebcamTracker';
@@ -28,7 +37,7 @@ const darkTheme = createTheme({
   },
 });
 
-// ─── Model list — all 8 GLB frames in public/ ────────────────────────────────
+// ─── Model list with mock prices and brands ──────────────────────────────────
 const MODELS_LIST = [
   {
     id: 'bolle',
@@ -39,6 +48,7 @@ const MODELS_LIST = [
     emoji: '🥽',
     tag: 'Goggle',
     color: '#4fa3e0',
+    price: 189,
   },
   {
     id: 'anaconda',
@@ -49,6 +59,7 @@ const MODELS_LIST = [
     emoji: '🕶️',
     tag: 'Sport',
     color: '#444',
+    price: 129,
   },
   {
     id: 'anaconda-cyris',
@@ -59,6 +70,7 @@ const MODELS_LIST = [
     emoji: '😎',
     tag: 'Sport',
     color: '#556b2f',
+    price: 149,
   },
   {
     id: 'bolt-tortoise',
@@ -69,6 +81,7 @@ const MODELS_LIST = [
     emoji: '🐢',
     tag: 'Casual',
     color: '#8B6914',
+    price: 159,
   },
   {
     id: 'bolt-black',
@@ -79,6 +92,7 @@ const MODELS_LIST = [
     emoji: '⚡',
     tag: 'Casual',
     color: '#222',
+    price: 169,
   },
   {
     id: 'glass',
@@ -89,6 +103,7 @@ const MODELS_LIST = [
     emoji: '✨',
     tag: 'Luxury',
     color: '#a0c4ff',
+    price: 249,
   },
   {
     id: 'prize',
@@ -99,6 +114,7 @@ const MODELS_LIST = [
     emoji: '🏆',
     tag: 'Shield',
     color: '#1a1a1a',
+    price: 199,
   },
   {
     id: 'bolle-mesh',
@@ -109,10 +125,13 @@ const MODELS_LIST = [
     emoji: '🔵',
     tag: 'Debug',
     color: '#3a7bd5',
+    price: 99,
   },
 ];
 
-// ─── App ──────────────────────────────────────────────────────────────────────
+const BRANDS = ['All', 'Sport', 'Casual', 'Luxury', 'Goggle'];
+const PRICE_FILTERS = ['All Prices', 'Price: Low-High', 'Price: High-Low'];
+
 export default function App() {
   const webcamRef = useRef(null);
 
@@ -124,6 +143,13 @@ export default function App() {
   const [debugDisplay,   setDebugDisplay]   = useState({
     fps: 0, scale: 0, angleY: 0, angleZ: 0, templeDist: 0, pd: 62, faceShape: '', recs: null,
   });
+
+  // Jeeliz-style State
+  const [activeTab, setActiveTab] = useState('try'); // 'try' | 'favourites' | 'polls'
+  const [favorites, setFavorites] = useState([]); // list of model ids
+  const [brandIndex, setBrandIndex] = useState(0); // index in BRANDS
+  const [priceIndex, setPriceIndex] = useState(0); // index in PRICE_FILTERS
+  const [showSlidersPopup, setShowSlidersPopup] = useState(false);
 
   // Manual slider state
   const [posX,  setPosX]  = useState(0);
@@ -143,7 +169,7 @@ export default function App() {
     return () => window.removeEventListener('camera-fallback-active', h);
   }, []);
 
-  // Poll debug data from Zustand at ~5 Hz (no 60fps React re-renders)
+  // Poll debug data from Zustand at ~5 Hz
   useEffect(() => {
     if (!showDebug) return;
     const id = setInterval(() => {
@@ -204,22 +230,90 @@ export default function App() {
     setIsManual(false);
   };
 
+  // Toggle favorite for current selected model
+  const toggleFavorite = () => {
+    if (!selectedModel) return;
+    if (favorites.includes(selectedModel.id)) {
+      setFavorites(favorites.filter(id => id !== selectedModel.id));
+    } else {
+      setFavorites([...favorites, selectedModel.id]);
+    }
+  };
+
+  const currentBrand = BRANDS[brandIndex];
+  const currentPriceFilter = PRICE_FILTERS[priceIndex];
+
+  // Process and filter/sort models based on active brand category, tab, and sorting
+  const processedModels = useMemo(() => {
+    let list = [...MODELS_LIST];
+
+    // Filter by Favourites tab
+    if (activeTab === 'favourites') {
+      list = list.filter(m => favorites.includes(m.id));
+    }
+
+    // Filter by category tag
+    if (currentBrand !== 'All') {
+      list = list.filter(m => m.tag === currentBrand);
+    }
+
+    // Apply price sorting
+    if (currentPriceFilter === 'Price: Low-High') {
+      list.sort((a, b) => a.price - b.price);
+    } else if (currentPriceFilter === 'Price: High-Low') {
+      list.sort((a, b) => b.price - a.price);
+    }
+
+    return list;
+  }, [activeTab, favorites, currentBrand, currentPriceFilter]);
+
   // Offsets passed to TrackingService for fine-tuning
   const manualOffsets = { x: posX, y: posY, z: posZ - (-0.6), scale };
 
   return (
     <ThemeProvider theme={darkTheme}>
-      <Grid container direction="column" sx={{ minHeight: '100vh' }}>
+      <Grid container direction="column" sx={{ minHeight: '100vh', backgroundColor: '#0b0c10' }}>
+        
+        {/* ── 1. Top Tab Bar (Jeeliz Inspired Navigation) ──────────────────── */}
+        <Box className="jeeliz-header">
+          <Typography className="jeeliz-logo">JEELIZ</Typography>
+          <Box className="jeeliz-tabs">
+            <Box 
+              className={`jeeliz-tab ${activeTab === 'try' ? 'active' : ''}`}
+              onClick={() => setActiveTab('try')}
+            >
+              <Typography sx={{ fontSize: '1.2rem', lineHeight: 1 }}>👓</Typography>
+              <Typography variant="caption">Try Glasses</Typography>
+            </Box>
+            <Box 
+              className={`jeeliz-tab ${activeTab === 'favourites' ? 'active' : ''}`}
+              onClick={() => setActiveTab('favourites')}
+            >
+              <Typography sx={{ fontSize: '1.2rem', lineHeight: 1 }}>
+                {favorites.length > 0 ? '❤️' : '🖤'}
+              </Typography>
+              <Typography variant="caption">
+                Favourites {favorites.length > 0 ? `(${favorites.length})` : ''}
+              </Typography>
+            </Box>
+            <Box 
+              className={`jeeliz-tab ${activeTab === 'polls' ? 'active' : ''}`}
+              onClick={() => setActiveTab('polls')}
+            >
+              <ShareIcon sx={{ fontSize: '1rem' }} />
+              <Typography variant="caption">My Polls</Typography>
+            </Box>
+          </Box>
+        </Box>
 
-        <Grid item xs={12}><Header /></Grid>
-
-        <Grid item container sx={{ p: { xs: 2, md: 4 }, flexGrow: 1, gap: 3 }} justifyContent="center">
-
-          {/* ── Visualizer Panel ─────────────────────────────────────────── */}
-          <Grid item xs={12} md={7} lg={7}>
+        {/* ── 2. Content Body ────────────────────────────────────────────── */}
+        <Grid item container sx={{ p: { xs: 1, md: 3 }, flexGrow: 1, gap: 2 }} justifyContent="center">
+          
+          {/* Main Visualizer viewport */}
+          <Grid item xs={12} md={7} lg={7} sx={{ display: 'flex', flexDirection: 'column' }}>
             <Box
               className="outer-div"
-              sx={{ position: 'relative', width: '100%', paddingTop: '56.25%' /* 16:9 */ }}
+              sx={{ position: 'relative', width: '100%', paddingTop: '56.25%', flexGrow: 1 }}
             >
               {/* Webcam layer + MediaPipe tracking */}
               <WebcamTracker
@@ -230,8 +324,8 @@ export default function App() {
 
               {/* Three.js overlay */}
               <Scene3D
-                modelUrl={selectedModel.path}
-                modelKey={selectedModel.id}
+                modelUrl={selectedModel?.path}
+                modelKey={selectedModel?.id}
                 showDebug={showDebug}
                 isManual={isManual}
                 manualX={posX}
@@ -240,82 +334,152 @@ export default function App() {
                 manualScale={scale}
                 manualRotY={rotY}
               />
-            </Box>
 
-            {/* Status row */}
-            <Box sx={{ mt: 2, display: 'flex', gap: 2, justifyContent: 'center', flexWrap: 'wrap' }}>
-              {cameraMocked ? (
-                <Box className="status-badge status-warning">
-                  <SecurityIcon fontSize="small" /> Simulated Camera Feed Active
-                </Box>
-              ) : (
-                <Box className="status-badge status-active">
-                  <CheckCircleOutlineIcon fontSize="small" /> Hardware Camera Active
-                </Box>
-              )}
-
-              <Button variant={showDebug ? 'contained' : 'outlined'} color="secondary" size="small"
-                startIcon={<BugReportIcon />} onClick={() => setShowDebug(!showDebug)}
-                sx={{ borderRadius: '20px', textTransform: 'none' }}>
-                Debug Mode
-              </Button>
-
-              <Button variant="contained" color="primary" size="small"
-                onClick={handleScreenshot} startIcon={<CameraAltIcon />}
-                sx={{ borderRadius: '20px', textTransform: 'none', boxShadow: '0 0 10px rgba(0,255,136,0.3)' }}>
-                Capture Fit
-              </Button>
-
-              {cameraMocked && (
-                <Button component="label" variant="outlined" size="small"
-                  startIcon={<FileUploadIcon />}
-                  sx={{ borderRadius: '20px', textTransform: 'none', color: '#00ff88', borderColor: '#00ff88' }}>
-                  Upload Media
-                  <input type="file" hidden accept="image/*,video/*" onChange={handleFileUpload} />
-                </Button>
-              )}
-            </Box>
-
-            {/* Debug overlay */}
-            {showDebug && (
-              <Box sx={{
-                mt: 2, p: 2, backgroundColor: 'rgba(20,25,40,0.8)',
-                border: '1px solid rgba(100,150,255,0.2)', borderRadius: '8px',
-                backdropFilter: 'blur(10px)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2,
-              }}>
-                {[
-                  ['FPS',           debugDisplay.fps, debugDisplay.fps < 30 ? 'error.main' : 'primary.main'],
-                  ['Scale',         debugDisplay.scale?.toFixed(2), 'white'],
-                  ['Head Y°',       ((debugDisplay.angleY || 0) * 180 / Math.PI).toFixed(1) + '°', 'white'],
-                  ['Temple Dist',   debugDisplay.templeDist?.toFixed(3), 'white'],
-                  ['PD (mm)',       debugDisplay.pd, 'white'],
-                  ['Face Shape',    debugDisplay.faceShape, '#00ff88'],
-                ].map(([label, val, color]) => (
-                  <Box key={label}>
-                    <Typography variant="caption" color="text.secondary">{label}</Typography>
-                    <Typography variant="body2" fontWeight="bold" color={color}>{val}</Typography>
+              {/* Floating Frame Position Sliders Popup */}
+              {showSlidersPopup && (
+                <Box className="jeeliz-popup-overlay">
+                  <Box className="jeeliz-popup-header">
+                    <Typography className="jeeliz-popup-title">FRAME POSITION</Typography>
+                    <CloseIcon 
+                      className="jeeliz-popup-close" 
+                      onClick={() => setShowSlidersPopup(false)} 
+                    />
                   </Box>
-                ))}
+                  <Stack spacing={1.5} className="slider-container">
+                    {[
+                      { label: 'Position X (Left/Right)', val: posX, set: setPosX, min: -0.4, max: 0.4, step: 0.005, fmt: (v) => v.toFixed(3) },
+                      { label: 'Position Y (Up/Down)',    val: posY, set: setPosY, min: -0.4, max: 0.4, step: 0.005, fmt: (v) => v.toFixed(3) },
+                      { label: 'Position Z (Depth)',      val: posZ, set: setPosZ, min: -1.2, max: -0.2, step: 0.01, fmt: (v) => v.toFixed(2) },
+                      { label: 'Scale (Size)',            val: scale, set: setScale, min: 0.08, max: 0.22, step: 0.002, fmt: (v) => v.toFixed(3) },
+                    ].map(({ label, val, set, min, max, step, fmt }) => (
+                      <Box key={label}>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <Typography variant="caption" sx={{ color: '#c5c6c7' }}>{label}</Typography>
+                          <Typography variant="caption" fontWeight="600" color="primary">{fmt(val)}</Typography>
+                        </Box>
+                        <Slider value={val} min={min} max={max} step={step} onChange={(_, v) => set(v)} size="small" />
+                      </Box>
+                    ))}
+
+                    {isManual && (
+                      <Box>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <Typography variant="caption" sx={{ color: '#c5c6c7' }}>Angle (Rotation Y)</Typography>
+                          <Typography variant="caption" fontWeight="600" color="primary">
+                            {((rotY * 180) / Math.PI).toFixed(0)}°
+                          </Typography>
+                        </Box>
+                        <Slider value={rotY} min={-Math.PI} max={Math.PI} step={0.05} onChange={(_, v) => setRotY(v)} size="small" />
+                      </Box>
+                    )}
+                  </Stack>
+                </Box>
+              )}
+            </Box>
+
+            {/* ── 3. Sub-menu Selector Row ─────────────────────────────────── */}
+            <Box className="jeeliz-submenu">
+              <Box 
+                className="jeeliz-submenu-item"
+                onClick={() => setBrandIndex((brandIndex + 1) % BRANDS.length)}
+              >
+                <SearchIcon sx={{ fontSize: '0.95rem' }} />
+                <Typography variant="caption">Brands: {currentBrand}</Typography>
               </Box>
-            )}
+              <Box 
+                className={`jeeliz-submenu-item ${showSlidersPopup ? 'active' : ''}`}
+                onClick={() => setShowSlidersPopup(!showSlidersPopup)}
+              >
+                <OpenWithIcon sx={{ fontSize: '0.95rem' }} />
+                <Typography variant="caption">Frame Position</Typography>
+              </Box>
+              <Box 
+                className="jeeliz-submenu-item"
+                onClick={() => setPriceIndex((priceIndex + 1) % PRICE_FILTERS.length)}
+              >
+                <LocalOfferIcon sx={{ fontSize: '0.95rem' }} />
+                <Typography variant="caption">{currentPriceFilter}</Typography>
+              </Box>
+            </Box>
+
+            {/* ── 4. Horizontal Previews Carousel ───────────────────────────── */}
+            <Box className="jeeliz-carousel-container">
+              {processedModels.length === 0 ? (
+                <Typography variant="caption" color="text.secondary" sx={{ py: 2, width: '100%', textAlign: 'center' }}>
+                  No styles fit the criteria.
+                </Typography>
+              ) : (
+                processedModels.map((model) => (
+                  <Box
+                    key={model.id}
+                    className={`jeeliz-carousel-card ${selectedModel?.id === model.id ? 'active' : ''}`}
+                    onClick={() => setSelectedModel(model)}
+                  >
+                    {favorites.includes(model.id) && (
+                      <FavoriteIcon className="jeeliz-heart-badge" />
+                    )}
+                    <Typography className="jeeliz-carousel-emoji">{model.emoji}</Typography>
+                    <Typography className="jeeliz-carousel-name">{model.name}</Typography>
+                    <Typography sx={{ fontSize: '0.52rem', opacity: 0.65, color: '#00ff88' }}>
+                      ${model.price}
+                    </Typography>
+                  </Box>
+                ))
+              )}
+            </Box>
+
+            {/* ── 5. Bottom Action Buttons Row ─────────────────────────────── */}
+            <Box className="jeeliz-actions-row">
+              <Tooltip title="Remove Glasses" arrow>
+                <Box className="jeeliz-action-btn btn-close" onClick={() => setSelectedModel(null)}>
+                  <Typography variant="h5" sx={{ fontWeight: 800 }}>×</Typography>
+                </Box>
+              </Tooltip>
+
+              <Tooltip title="Reset Position" arrow>
+                <Box className="jeeliz-action-btn btn-reset" onClick={handleResetSliders}>
+                  <Typography variant="h5" sx={{ fontWeight: 800 }}>↻</Typography>
+                </Box>
+              </Tooltip>
+
+              <Tooltip title="Like style" arrow>
+                <Box 
+                  className={`jeeliz-action-btn btn-favorite ${selectedModel && favorites.includes(selectedModel.id) ? 'active' : ''}`} 
+                  onClick={toggleFavorite}
+                >
+                  <Typography variant="h5" sx={{ lineHeight: 1 }}>♥</Typography>
+                </Box>
+              </Tooltip>
+            </Box>
           </Grid>
 
-          {/* ── Configurator Panel ───────────────────────────────────────── */}
+          {/* Desktop Right Info/Sidebar Panel */}
           <Grid item xs={12} md={4} lg={4}>
             <Card className="glass-panel" sx={{ height: '100%', background: 'transparent' }}>
               <CardContent sx={{ p: 0 }}>
-                <Typography variant="h5" fontWeight="700"
-                  sx={{ mb: 2, color: '#ffffff', display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <TuneIcon color="primary" /> Glasses Configurator
+                <Typography variant="subtitle2" sx={{ mb: 1.5, color: '#888bc4', fontWeight: '600', letterSpacing: '0.08em' }}>
+                  ENGINE CONTROLS
                 </Typography>
 
-                {/* AI Recommendation */}
+                {/* Tracking Mode Switch */}
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                  <Typography variant="body2" sx={{ color: '#ffffff', fontWeight: '600' }}>
+                    TRACKING MODE
+                  </Typography>
+                  <FormControlLabel
+                    control={<Switch checked={isManual} onChange={(e) => setIsManual(e.target.checked)} color="primary" />}
+                    label={isManual ? 'Manual Control' : 'AI Face Tracking'}
+                    sx={{ color: '#ffffff', m: 0 }}
+                  />
+                </Box>
+
+                {/* AI Recommendation Alert */}
                 {!isManual && debugDisplay.recs && (
                   <Alert icon={<FaceRetouchingNaturalIcon />} severity="info"
                     sx={{ mb: 2, borderRadius: '10px', backgroundColor: 'rgba(0,255,136,0.08)',
                       border: '1px solid rgba(0,255,136,0.2)', color: '#fff' }}>
                     <Typography variant="subtitle2" fontWeight="bold">
-                      Detected Face: {debugDisplay.faceShape}
+                      Face Shape: {debugDisplay.faceShape}
                     </Typography>
                     <Typography variant="caption" sx={{ opacity: 0.8 }}>
                       PD: {debugDisplay.pd}mm · {debugDisplay.recs.desc}
@@ -333,144 +497,59 @@ export default function App() {
                   </Alert>
                 )}
 
-                {/* ── Model Selector ─────────────────────────────────── */}
-                <Typography variant="subtitle2" sx={{ mb: 1.5, color: '#888bc4', fontWeight: '600', letterSpacing: '0.08em' }}>
-                  SELECT GLASSES STYLE
-                </Typography>
-                <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1.2, mb: 3 }}>
-                  {MODELS_LIST.map((model) => (
-                    <Tooltip key={model.id} title={model.desc} placement="top" arrow>
-                      <Box
-                        onClick={() => setSelectedModel(model)}
-                        sx={{
-                          cursor: 'pointer',
-                          borderRadius: '10px',
-                          border: selectedModel.id === model.id
-                            ? '1.5px solid #00ff88'
-                            : '1px solid rgba(255,255,255,0.07)',
-                          background: selectedModel.id === model.id
-                            ? 'rgba(0,255,136,0.07)'
-                            : 'rgba(255,255,255,0.02)',
-                          boxShadow: selectedModel.id === model.id
-                            ? '0 0 12px rgba(0,255,136,0.18)'
-                            : 'none',
-                          p: '9px 10px 8px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 1,
-                          transition: 'all 0.18s ease',
-                          '&:hover': {
-                            borderColor: 'rgba(0,255,136,0.4)',
-                            background: 'rgba(0,255,136,0.04)',
-                            transform: 'translateY(-1px)',
-                          },
-                        }}
-                      >
-                        {/* Emoji icon circle */}
-                        <Box sx={{
-                          width: 36, height: 36, borderRadius: '8px', flexShrink: 0,
-                          background: `${model.color}22`,
-                          border: `1px solid ${model.color}44`,
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          fontSize: '1.1rem',
-                        }}>
-                          {model.emoji}
-                        </Box>
-
-                        <Box sx={{ minWidth: 0 }}>
-                          <Typography
-                            variant="caption"
-                            sx={{
-                              display: 'block',
-                              color: selectedModel.id === model.id ? '#00ff88' : '#e0e0e0',
-                              fontWeight: 700,
-                              fontSize: '0.72rem',
-                              lineHeight: 1.2,
-                              whiteSpace: 'nowrap',
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                            }}
-                          >
-                            {model.name}
-                          </Typography>
-                          <Typography
-                            variant="caption"
-                            sx={{
-                              display: 'block',
-                              color: '#666',
-                              fontSize: '0.62rem',
-                              lineHeight: 1.2,
-                            }}
-                          >
-                            {model.brand} · {model.tag}
-                          </Typography>
-                        </Box>
-
-                        {/* Active checkmark */}
-                        {selectedModel.id === model.id && (
-                          <Box sx={{ ml: 'auto', color: '#00ff88', fontSize: '0.75rem', flexShrink: 0 }}>
-                            ✓
-                          </Box>
-                        )}
-                      </Box>
-                    </Tooltip>
-                  ))}
-                </Box>
-
                 <Divider sx={{ my: 2, borderColor: 'rgba(255,255,255,0.08)' }} />
 
-                {/* Mode Toggle */}
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                  <Typography variant="subtitle2" sx={{ color: '#888bc4', fontWeight: '600' }}>
-                    TRACKING MODE
-                  </Typography>
-                  <FormControlLabel
-                    control={<Switch checked={isManual} onChange={(e) => setIsManual(e.target.checked)} color="primary" />}
-                    label={isManual ? 'Manual Control' : 'AI Face Tracking'}
-                    sx={{ color: '#ffffff' }}
-                  />
-                </Box>
-
-                <Typography variant="caption" sx={{ display: 'block', mb: 2, color: '#888bc4' }}>
-                  {isManual
-                    ? 'Use sliders to place the glasses.'
-                    : 'Sliders act as fine-tune offsets on top of AI tracking.'}
+                {/* Upload Media / Fallback controls */}
+                <Typography variant="subtitle2" sx={{ mb: 1.5, color: '#888bc4', fontWeight: '600', letterSpacing: '0.08em' }}>
+                  SIMULATOR CONTROLS
                 </Typography>
-
-                {/* Sliders */}
-                <Stack spacing={2} className="slider-container">
-                  {[
-                    { label: 'Position X (Left/Right)', val: posX, set: setPosX, min: -0.4, max: 0.4, step: 0.005, fmt: (v) => v.toFixed(3) },
-                    { label: 'Position Y (Up/Down)',    val: posY, set: setPosY, min: -0.4, max: 0.4, step: 0.005, fmt: (v) => v.toFixed(3) },
-                    { label: 'Position Z (Depth)',      val: posZ, set: setPosZ, min: -1.2, max: -0.2, step: 0.01, fmt: (v) => v.toFixed(2) },
-                    { label: 'Scale (Size)',            val: scale, set: setScale, min: 0.08, max: 0.22, step: 0.002, fmt: (v) => v.toFixed(3) },
-                  ].map(({ label, val, set, min, max, step, fmt }) => (
-                    <Box key={label}>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <Typography variant="caption" sx={{ color: '#c5c6c7' }}>{label}</Typography>
-                        <Typography variant="caption" fontWeight="600" color="primary">{fmt(val)}</Typography>
-                      </Box>
-                      <Slider value={val} min={min} max={max} step={step} onChange={(_, v) => set(v)} />
-                    </Box>
-                  ))}
-
-                  {isManual && (
-                    <Box>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <Typography variant="caption" sx={{ color: '#c5c6c7' }}>Angle (Rotation Y)</Typography>
-                        <Typography variant="caption" fontWeight="600" color="primary">
-                          {((rotY * 180) / Math.PI).toFixed(0)}°
-                        </Typography>
-                      </Box>
-                      <Slider value={rotY} min={-Math.PI} max={Math.PI} step={0.05} onChange={(_, v) => setRotY(v)} />
-                    </Box>
-                  )}
-
-                  <Button variant="outlined" className="neon-btn" onClick={handleResetSliders}
-                    startIcon={<AutorenewIcon />} fullWidth sx={{ mt: 2 }}>
-                    Reset Placement
+                
+                <Stack spacing={1.5}>
+                  <Button variant={showDebug ? 'contained' : 'outlined'} color="secondary" fullWidth
+                    startIcon={<BugReportIcon />} onClick={() => setShowDebug(!showDebug)}
+                    sx={{ borderRadius: '20px', textTransform: 'none' }}>
+                    Toggle Debug Mode
                   </Button>
+
+                  <Button variant="contained" color="primary" fullWidth
+                    onClick={handleScreenshot} startIcon={<CameraAltIcon />}
+                    sx={{ borderRadius: '20px', textTransform: 'none', boxShadow: '0 0 10px rgba(0,255,136,0.3)' }}>
+                    Capture VTO Screenshot
+                  </Button>
+
+                  {cameraMocked && (
+                    <Button component="label" variant="outlined" fullWidth
+                      startIcon={<FileUploadIcon />}
+                      sx={{ borderRadius: '20px', textTransform: 'none', color: '#00ff88', borderColor: '#00ff88' }}>
+                      Upload Photo / Video
+                      <input type="file" hidden accept="image/*,video/*" onChange={handleFileUpload} />
+                    </Button>
+                  )}
                 </Stack>
+
+                {/* Debug Data Metrics Panel */}
+                {showDebug && (
+                  <Box sx={{
+                    mt: 3, p: 2, backgroundColor: 'rgba(20,25,40,0.8)',
+                    border: '1px solid rgba(100,150,255,0.2)', borderRadius: '8px',
+                    backdropFilter: 'blur(10px)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2,
+                  }}>
+                    {[
+                      ['FPS',           debugDisplay.fps, debugDisplay.fps < 20 ? 'error.main' : 'primary.main'],
+                      ['Scale',         debugDisplay.scale?.toFixed(3), 'white'],
+                      ['Head Y°',       ((debugDisplay.angleY || 0) * 180 / Math.PI).toFixed(1) + '°', 'white'],
+                      ['Temple Dist',   debugDisplay.templeDist?.toFixed(3), 'white'],
+                      ['PD (mm)',       debugDisplay.pd, 'white'],
+                      ['Face Shape',    debugDisplay.faceShape, '#00ff88'],
+                    ].map(([label, val, color]) => (
+                      <Box key={label}>
+                        <Typography variant="caption" color="text.secondary">{label}</Typography>
+                        <Typography variant="body2" fontWeight="bold" color={color}>{val}</Typography>
+                      </Box>
+                    ))}
+                  </Box>
+                )}
+
               </CardContent>
             </Card>
           </Grid>

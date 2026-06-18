@@ -1,13 +1,14 @@
 import * as THREE from 'three';
 import useTrackingStore from '../store/useTrackingStore';
+import {
+  computeEyeCenter,
+  computePD, detectFaceShape, getFrameRecommendations,
+  LM
+} from '../utils/FaceScale';
 import { extractHeadPose } from '../utils/HeadPose';
 import {
-  computeEyeCenter, eyeCenterToWorld,
-  computePD, detectFaceShape, getFrameRecommendations,
-  LM,
-} from '../utils/FaceScale';
-import {
-  QuaternionSmoother, ScalarSmoother, OneEuroVector3,
+  OneEuroVector3,
+  QuaternionSmoother, ScalarSmoother,
 } from '../utils/Smoothing';
 
 // Module-level smoothers — persist across React re-renders, reset on tracking loss

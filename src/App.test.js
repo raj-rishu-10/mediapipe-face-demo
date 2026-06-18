@@ -35,9 +35,9 @@ jest.mock('@mediapipe/tasks-vision', () => ({
   }
 }));
 
-test('renders App with Glasses Configurator title', () => {
+test('renders App with JEELIZ title', () => {
   render(<App />);
-  const titleElement = screen.getByText(/Glasses Configurator/i);
+  const titleElement = screen.getByText(/JEELIZ/i);
   expect(titleElement).toBeInTheDocument();
   
   // Verify webcam and canvas fallbacks are rendered
