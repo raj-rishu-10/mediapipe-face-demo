@@ -3,18 +3,29 @@ import { useLoader } from '@react-three/fiber';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
 import * as THREE from 'three';
 
+// All 8 GLB models to enable preloading
+export const ALL_MODEL_PATHS = [
+  '/translated-bolle.glb',
+  '/anaconda_black.glb',
+  '/models/anaconda_cyris.glb',
+  '/bolt_2.0_turtoise.glb',
+  '/models/bolt_2.0_black.glb',
+  '/models/glass.glb',
+  '/models/prize_Black.glb',
+  '/with-mesh-bolle.glb',
+];
+
 /**
  * GlassesModel
  *
  * Renders the GLB glasses model as a child of FaceAnchor.
- * Clones the cached GLTF scene to avoid the invisible-on-switch bug.
- * Auto-centers the model so the nose bridge sits at the local origin (0, 0, 0),
- * which is where FaceAnchor places the eye center.
+ * Clones the cached GLTF scene to avoid sharing mutable state.
+ * Auto-centers the model so the nose bridge sits at the local origin (0, 0, 0).
  */
 export function GlassesModel({ url }) {
   const gltf = useLoader(GLTFLoader, url);
 
-  // Clone scene to avoid shared mutable Three.js object (root cause of invisible bug)
+  // Clone scene to avoid shared mutable Three.js object
   const clonedScene = useMemo(() => gltf.scene.clone(true), [gltf.scene]);
 
   useEffect(() => {
@@ -28,23 +39,23 @@ export function GlassesModel({ url }) {
     clonedScene.position.y = -center.y;
 
     // Align Z so the back face of the lenses (closest to the face) sits at Z=0
-    // rather than the geometric center. This prevents the glasses floating forward.
     clonedScene.position.z = -box.max.z + (box.max.z - box.min.z) * 0.1;
 
-    // Dispose on unmount to free GPU memory
-    return () => {
-      clonedScene.traverse((child) => {
-        if (child.isMesh) {
-          child.geometry?.dispose();
-          if (Array.isArray(child.material)) {
-            child.material.forEach((m) => m.dispose());
-          } else {
-            child.material?.dispose();
-          }
-        }
-      });
-    };
+    // Note: We do NOT manually dispose geometries and materials of the cloned scene here,
+    // because they share references with the cached GLTF model inside useLoader.
+    // Disposing them breaks the loader cache, making the model invisible when switched back.
   }, [clonedScene]);
 
   return <primitive object={clonedScene} />;
+}
+
+// Preload helper to cache all models on startup
+export function preloadAllGlasses() {
+  ALL_MODEL_PATHS.forEach((path) => {
+    try {
+      useLoader.preload(GLTFLoader, path);
+    } catch (e) {
+      console.warn('Preload failed for model:', path, e);
+    }
+  });
 }

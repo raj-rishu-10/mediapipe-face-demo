@@ -1,14 +1,12 @@
-import { Suspense } from 'react';
+import { Suspense, useEffect } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { FaceAnchor }    from './FaceAnchor';
-import { GlassesModel }  from './GlassesModel';
+import { GlassesModel, preloadAllGlasses }  from './GlassesModel';
 import { FaceOccluder }  from './FaceOccluder';
 import { FaceMeshDebug } from './FaceMeshDebug';
 
 /**
  * Lights — identical to Jeeliz demos which use simple ambient + directional.
- * Jeeliz doesn't do complex lighting on the glasses; it relies on the
- * GLB's baked textures / PBR materials. We match this.
  */
 function Lights() {
   return (
@@ -22,31 +20,6 @@ function Lights() {
 
 /**
  * Scene3D — the MediaPipe equivalent of Jeeliz's React Three Fiber Canvas setup.
- *
- * ── JEELIZ ANALYSIS ─────────────────────────────────────────────────────────
- * Jeeliz AppCanvas.jsx:
- *   <Canvas className='mirrorX' style={{ position:'fixed', zIndex:2, ...sizing }}>
- *     <ThreeGrabber sizing={sizing} />   ← syncs camera FOV to video size
- *     <FaceFollower faceIndex={0} />     ← the tracked object
- *   </Canvas>
- *   <canvas ref={faceFilterCanvasRef} style={{ position:'fixed', zIndex:1 }} />
- *
- * Key details:
- *   - Canvas is ABOVE the video canvas (zIndex:2 vs zIndex:1)
- *   - Canvas uses className='mirrorX' (CSS transform: scaleX(-1)) — mirroring
- *   - preserveDrawingBuffer:true for screenshot capture
- *   - Camera FOV ≈ 35° (minimum video dimension FOV)
- *
- * ── MEDIAPIPE EQUIVALENT ────────────────────────────────────────────────────
- *   - Canvas is position:absolute, top/left:0, width/height:100% over webcam
- *   - WebcamTracker renders the video in CSS-mirrored position:absolute below
- *   - preserveDrawingBuffer:true for screenshots
- *   - Camera fov=38 (tuned to match Jeeliz's 35° min-dim FOV at typical aspect)
- *
- * Scene hierarchy (matches Jeeliz FaceFollower structure):
- *   FaceAnchor  (threeCompositeObject)
- *   ├── FaceOccluder   (create_threejsOccluder)
- *   └── GlassesModel   (user content)
  */
 export function Scene3D({
   modelUrl,
@@ -59,6 +32,11 @@ export function Scene3D({
   manualScale,
   manualRotY,
 }) {
+  // Preload all glasses GLB files on mount to ensure instant, lag-free switching
+  useEffect(() => {
+    preloadAllGlasses();
+  }, []);
+
   return (
     <Canvas
       gl={{ preserveDrawingBuffer: true, antialias: true }}
