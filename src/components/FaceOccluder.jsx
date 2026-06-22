@@ -19,7 +19,7 @@ import React from 'react';
 export function FaceOccluder() {
   return (
     <mesh
-      position={[0, -0.25, 0.0]}
+      position={[0, -0.25, -0.4]}
       scale={[0.6, 0.8, 0.7]}
       renderOrder={-1}
       frustumCulled={false}

@@ -36,7 +36,7 @@ export function FaceAnchor({
       obj.position.set(
         manualX,
         manualY - (-0.05) * manualScale, // compensate glasses Y offset
-        manualZ - 0.75 * manualScale     // compensate glasses Z offset
+        manualZ - 0.15 * manualScale     // compensate glasses Z offset
       );
       obj.rotation.set(0, manualRotY, 0);
       return;
