@@ -11,9 +11,14 @@ import useTrackingStore from '../store/useTrackingStore';
  * @param {boolean} enabled - pause tracking when manual mode is on
  */
 export function useFaceLandmarker(videoRef, manualOffsets, enabled) {
-  const rafRef       = useRef(null);
-  const landmarkerRef = useRef(null);
-  const setTracked   = useTrackingStore((s) => s.setFaceTracked);
+  const rafRef          = useRef(null);
+  const landmarkerRef   = useRef(null);
+  const setTracked      = useTrackingStore((s) => s.setFaceTracked);
+  // Always-current offsets ref — fixes stale closure in the rAF loop
+  const manualOffsetsRef = useRef(manualOffsets);
+
+  // Keep ref in sync with latest prop on every render (no effect restart needed)
+  manualOffsetsRef.current = manualOffsets;
 
   useEffect(() => {
     let alive = true;
@@ -72,7 +77,8 @@ export function useFaceLandmarker(videoRef, manualOffsets, enabled) {
           const aspect      = videoWidth / videoHeight;
 
           const results = landmarkerRef.current.detectForVideo(video, performance.now());
-          processTrackingResults(results, manualOffsets, { fov: 38, aspect });
+          // Use ref instead of stale closure — always reads latest slider values
+          processTrackingResults(results, manualOffsetsRef.current, { fov: 38, aspect });
         } catch (err) {
           console.error('[useFaceLandmarker] detectForVideo error:', err);
         }

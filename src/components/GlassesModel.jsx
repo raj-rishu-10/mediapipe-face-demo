@@ -61,7 +61,7 @@ export function GlassesModel({ url, scaleMultiplier }) {
 
     clone.position.x = -center.x;
     clone.position.y = -center.y;
-    clone.position.z = -box.max.z + (box.max.z - box.min.z) * 0.02;
+    clone.position.z = -box.max.z + (box.max.z - box.min.z) * 0.1;
 
     // Normalize scale: make the width of the glasses exactly 1.0 unit in local space, factored by scaleMultiplier
     const width = box.max.x - box.min.x;
@@ -77,7 +77,7 @@ export function GlassesModel({ url, scaleMultiplier }) {
   // Wrap in a group to apply a slight downward and forward offset in FaceAnchor units
   // so the glasses rest naturally on the nose bridge slightly below the eye center.
   return (
-    <group position={[0, -0.05, 0.15]}>
+    <group position={[0, -0.06, 0.72]}>
       <primitive object={clonedScene} />
     </group>
   );
