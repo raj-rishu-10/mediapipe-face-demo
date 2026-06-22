@@ -25,6 +25,8 @@ export function Scene3D({
   modelUrl,
   modelKey,
   scaleMultiplier,
+  yOffset = 0,
+  zOffset = 0,
   showDebug,
   isManual,
   manualX,
@@ -73,7 +75,13 @@ export function Scene3D({
         {/* Glasses model — child of FaceAnchor, never attached to a single landmark */}
         {modelUrl && (
           <Suspense fallback={null}>
-            <GlassesModel key={modelKey} url={modelUrl} scaleMultiplier={scaleMultiplier} />
+            <GlassesModel
+              key={modelKey}
+              url={modelUrl}
+              scaleMultiplier={scaleMultiplier}
+              yOffset={yOffset}
+              zOffset={zOffset}
+            />
           </Suspense>
         )}
       </FaceAnchor>

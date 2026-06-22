@@ -49,7 +49,9 @@ const MODELS_LIST = [
     tag: 'Goggle',
     color: '#4fa3e0',
     price: 189,
-    scaleMultiplier: 1.18,
+    scaleMultiplier: 1.12,
+    yOffset: -0.01,
+    zOffset: 0.0,
   },
   {
     id: 'anaconda',
@@ -61,7 +63,9 @@ const MODELS_LIST = [
     tag: 'Sport',
     color: '#444',
     price: 129,
-    scaleMultiplier: 1.03,
+    scaleMultiplier: 0.95,
+    yOffset: -0.05,
+    zOffset: -0.02,
   },
   {
     id: 'anaconda-cyris',
@@ -73,7 +77,9 @@ const MODELS_LIST = [
     tag: 'Sport',
     color: '#556b2f',
     price: 149,
-    scaleMultiplier: 1.03,
+    scaleMultiplier: 0.95,
+    yOffset: -0.05,
+    zOffset: -0.02,
   },
   {
     id: 'bolt-tortoise',
@@ -85,7 +91,9 @@ const MODELS_LIST = [
     tag: 'Casual',
     color: '#8B6914',
     price: 159,
-    scaleMultiplier: 0.97,
+    scaleMultiplier: 0.95,
+    yOffset: -0.03,
+    zOffset: -0.01,
   },
   {
     id: 'bolt-black',
@@ -97,7 +105,9 @@ const MODELS_LIST = [
     tag: 'Casual',
     color: '#222',
     price: 169,
-    scaleMultiplier: 0.97,
+    scaleMultiplier: 0.95,
+    yOffset: -0.03,
+    zOffset: -0.01,
   },
   {
     id: 'glass',
@@ -109,7 +119,9 @@ const MODELS_LIST = [
     tag: 'Luxury',
     color: '#a0c4ff',
     price: 249,
-    scaleMultiplier: 0.90,
+    scaleMultiplier: 0.92,
+    yOffset: -0.02,
+    zOffset: -0.01,
   },
   {
     id: 'prize',
@@ -121,7 +133,9 @@ const MODELS_LIST = [
     tag: 'Shield',
     color: '#1a1a1a',
     price: 199,
-    scaleMultiplier: 1.08,
+    scaleMultiplier: 1.02,
+    yOffset: -0.04,
+    zOffset: -0.02,
   },
   {
     id: 'bolle-mesh',
@@ -133,7 +147,9 @@ const MODELS_LIST = [
     tag: 'Debug',
     color: '#3a7bd5',
     price: 99,
-    scaleMultiplier: 1.18,
+    scaleMultiplier: 1.12,
+    yOffset: -0.01,
+    zOffset: 0.0,
   },
 ];
 
@@ -337,6 +353,8 @@ export default function App() {
                 modelUrl={selectedModel?.path}
                 modelKey={selectedModel?.id}
                 scaleMultiplier={selectedModel?.scaleMultiplier}
+                yOffset={selectedModel?.yOffset || 0}
+                zOffset={selectedModel?.zOffset || 0}
                 showDebug={showDebug}
                 isManual={isManual}
                 manualX={posX}
